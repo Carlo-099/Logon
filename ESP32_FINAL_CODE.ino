@@ -26,10 +26,9 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define ECHO_PIN 19
 
 // ===================== L298N Pins =====================
-// COMMENTED OUT FOR GPS TESTING - Motor disabled
-// #define ENA 25
-// #define IN1 26
-// #define IN2 27
+#define ENA 25
+#define IN1 26
+#define IN2 27
 
 // ===================== WiFi Configuration =====================
 #define WIFI_SSID "LUNA LAPUK"
@@ -69,27 +68,26 @@ bool ultrasonicEnabled = false;   // Default to disabled until profiling enables
 bool audioEnabled = false;        // Default to disabled until profiling enables it
 
 // ===================== Motor Control =====================
-// COMMENTED OUT FOR GPS TESTING - Motor disabled
-// void motorStop() {
-//   analogWrite(ENA, 0);
-//   digitalWrite(IN1, LOW);
-//   digitalWrite(IN2, LOW);
-// }
-//
-// void motorForwardContinuous() {
-//   digitalWrite(IN1, HIGH);
-//   digitalWrite(IN2, LOW);
-//   analogWrite(ENA, 255);
-// }
-//
-// void motorPulse() {
-//   digitalWrite(IN1, HIGH);
-//   digitalWrite(IN2, LOW);
-//   analogWrite(ENA, 255);
-//   delay(300);
-//   analogWrite(ENA, 0);
-//   delay(300);
-// }
+void motorStop() {
+  analogWrite(ENA, 0);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+}
+
+void motorForwardContinuous() {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, 255);
+}
+
+void motorPulse() {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, 255);
+  delay(300);
+  analogWrite(ENA, 0);
+  delay(300);
+}
 
 // ===================== Ultrasonic =====================
 float getDistance() {
@@ -253,18 +251,16 @@ void pollHardwareControl() {
       Serial.println("   ⚠️ Values changed!");
     }
     
-  // COMMENTED OUT FOR GPS TESTING - Motor control disabled
-  // if (!motorEnabled) {
-  //   motorStop();
-  //   Serial.println("🛑 Motor stopped by Firebase control");
-  // }
+  if (!motorEnabled) {
+    motorStop();
+    Serial.println("🛑 Motor stopped by Firebase control");
+  }
     
-  // COMMENTED OUT FOR GPS TESTING - Audio control disabled
-  // if (!audioEnabled && currentAudioState != 0) {
-  //   player.stop();
-  //   currentAudioState = 0;
-  //   Serial.println("🔇 Audio stopped by Firebase control");
-  // }
+  if (!audioEnabled && currentAudioState != 0) {
+    player.stop();
+    currentAudioState = 0;
+    Serial.println("🔇 Audio stopped by Firebase control");
+  }
 }
 
 // ===================== Setup =====================
@@ -281,7 +277,7 @@ void setup() {
   Serial.println("========================================");
   Serial.println("=== ESP32 BOOTING ===");
   Serial.println("========================================");
-  Serial.println("Starting GPS test mode...");
+  Serial.println("Starting system initialization...");
   Serial.print("Serial test: ");
   Serial.println("WORKING!");
   Serial.println("========================================");
@@ -294,15 +290,15 @@ void setup() {
   firebaseGPSData.setResponseSize(1024);
   firebaseHardwareData.setResponseSize(2048);
 
-  // COMMENTED OUT FOR GPS TESTING - Ultrasonic pins disabled
-  // pinMode(TRIG_PIN, OUTPUT);
-  // pinMode(ECHO_PIN, INPUT);
-  // COMMENTED OUT FOR GPS TESTING - Motor pins disabled
-  // pinMode(ENA, OUTPUT);
-  // pinMode(IN1, OUTPUT);
-  // pinMode(IN2, OUTPUT);
-  //
-  // motorStop();
+  // Ultrasonic pins
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  // Motor pins
+  pinMode(ENA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  
+  motorStop();
 
   // OLED init
   Wire.begin(21, 22);
@@ -313,15 +309,15 @@ void setup() {
   display.println("System Booting...");
   display.display();
 
-  // DFPlayer init - COMMENTED OUT FOR GPS TESTING
-  // dfSerial.begin(9600, SERIAL_8N1, 13, 14); //DF_RX, DF_TX
-  // if (player.begin(dfSerial)) {
-  //   player.volume(30);
-  //   player.playFolder(1, 1); // Play 001.mp3 on startup
-  //   Serial.println("✅ DFPlayer Active: Playing 001.mp3");
-  // } else {
-  //   Serial.println("❌ DFPlayer Error!");
-  // }
+  // DFPlayer init
+  dfSerial.begin(9600, SERIAL_8N1, 13, 14); //DF_RX, DF_TX
+  if (player.begin(dfSerial)) {
+    player.volume(30);
+    player.playFolder(1, 1); // Play 001.mp3 on startup
+    Serial.println("✅ DFPlayer Active: Playing 001.mp3");
+  } else {
+    Serial.println("❌ DFPlayer Error!");
+  }
 
   // GPS init
   GPS_Serial.begin(9600, SERIAL_8N1, 5, 4);
@@ -484,7 +480,7 @@ void loop() {
       systemReady = true;
       Serial.println();
       Serial.println("========================================");
-      Serial.println("✅ SYSTEM ACTIVE - GPS TESTING MODE");
+      Serial.println("✅ SYSTEM ACTIVE - ALL HARDWARE ENABLED");
       Serial.println("========================================");
       Serial.print("   systemReady: ");
       Serial.println(systemReady ? "YES" : "NO");
@@ -575,72 +571,94 @@ void loop() {
   }
 
   // ===================== Firebase Hardware Control Check =====================
-  // COMMENTED OUT FOR GPS TESTING - Hardware polling disabled to isolate GPS
-  // if (systemReady && WiFi.status() == WL_CONNECTED && firebaseReady) {
-  //   if (millis() - lastHardwareCheck > 10000) {  // Check every 10 seconds
-  //     pollHardwareControl();
-  //     lastHardwareCheck = millis();
-  //   }
-  // }
+  if (systemReady && WiFi.status() == WL_CONNECTED && firebaseReady) {
+    if (millis() - lastHardwareCheck > 2000) {  // Check every 2 seconds
+      pollHardwareControl();
+      lastHardwareCheck = millis();
+    }
+  }
 
-  // ===================== Ultrasonic Logic - COMMENTED OUT FOR GPS TESTING =====================
-  // Simplified display - GPS only with Firebase status
+  // ===================== Ultrasonic Sensor Logic =====================
+  // Calculate distance once (will be used for both logic and display)
+  if (ultrasonicEnabled) {
+    distance = getDistance();
+    if (distance > 0 && distance < 400) {  // Valid range: 0-400cm
+      Serial.print("📏 Distance: ");
+      Serial.print(distance);
+      Serial.println(" cm");
+      
+      // Motor control based on distance
+      if (motorEnabled) {
+        if (distance < 30) {  // Object too close
+          motorPulse();  // Vibrate/pulse motor
+        } else {
+          motorStop();
+        }
+      }
+      
+      // Audio control based on distance
+      if (audioEnabled) {
+        if (distance < 20 && currentAudioState != 1) {
+          player.playFolder(1, 2);  // Play 002.mp3
+          currentAudioState = 1;
+          Serial.println("🔊 Playing 002.mp3 (close object)");
+        } else if (distance >= 20 && distance < 50 && currentAudioState != 2) {
+          player.playFolder(1, 3);  // Play 003.mp3
+          currentAudioState = 2;
+          Serial.println("🔊 Playing 003.mp3 (medium distance)");
+        } else if (distance >= 50 && currentAudioState != 0) {
+          player.stop();
+          currentAudioState = 0;
+          Serial.println("🔇 Audio stopped (object far)");
+        }
+      }
+    }
+  } else {
+    // Ultrasonic disabled - stop motor and audio if they were running
+    distance = 0;  // Reset distance when disabled
+    if (motorEnabled) {
+      motorStop();
+    }
+    if (audioEnabled && currentAudioState != 0) {
+      player.stop();
+      currentAudioState = 0;
+    }
+  }
+
+  // ===================== OLED Display =====================
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.println("GPS Status:");
-
-  if (gps.location.isValid()) {
-    display.setCursor(0, 10);
-    display.print("Lat: ");
-    display.println(lat, 6);
-    display.setCursor(0, 20);
-    display.print("Lon: ");
-    display.println(lon, 6);
-    display.setCursor(0, 30);
-    display.print("Sats: ");
-    display.print(gps.satellites.value());
-    display.print(" [FIX]");
-    
-    // Show Firebase upload status
-    display.setCursor(0, 40);
-    if (systemReady && WiFi.status() == WL_CONNECTED && firebaseReady) {
-      static unsigned long lastUploadAttempt = 0;
-      static bool uploadSuccess = false;
-      
-      if (millis() - lastGPSUpdate > 5000) {
-        display.print("Uploading...");
-        display.display();
-        updateGPSInFirebase();
-        lastGPSUpdate = millis();
-        lastUploadAttempt = millis();
-        uploadSuccess = true;  // Assume success for now
-      } else if (uploadSuccess && (millis() - lastUploadAttempt < 2000)) {
-        display.print("Uploaded! ✓");
+  
+  // Show ultrasonic distance ONLY when enabled (reuse distance calculated above)
+  if (ultrasonicEnabled) {
+    if (distance > 0 && distance < 400) {
+      display.print(distance, 1);
+      display.println(" CM");
     } else {
-        display.print("WiFi:OK FB:OK");
-      }
-    } else {
-      display.print("WiFi:");
-      display.print(WiFi.status() == WL_CONNECTED ? "OK" : "NO");
-      display.print(" FB:");
-      display.print(firebaseReady ? "OK" : "NO");
+      display.println("-- CM");
     }
-    
-    display.setCursor(0, 50);
-    display.print("Next upload: ");
-    display.print((5000 - (millis() - lastGPSUpdate)) / 1000);
-    display.print("s");
-    } else {
-    display.setCursor(0, 15);
-    display.println("Searching GPS...");
-    display.setCursor(0, 30);
-    display.print("Satellites: ");
-    display.println(gps.satellites.value());
-    display.setCursor(0, 45);
-    display.println("Waiting for fix...");
   }
-
+  // If ultrasonic disabled, show nothing (leave blank)
+  
+  // WiFi and Firebase status (always show)
+  display.setCursor(0, 15);
+  display.print("WiFi:");
+  display.print(WiFi.status() == WL_CONNECTED ? "OK" : "NO");
+  display.setCursor(70, 15);
+  display.print("FB:");
+  display.print(firebaseReady ? "OK" : "NO");
+  
+  // GPS Satellites and Fix status
+  display.setCursor(0, 30);
+  display.print("Sats: ");
+  display.print(gps.satellites.value());
+  if (gps.location.isValid()) {
+    display.print(" FIX");
+  } else {
+    display.print(" ---");
+  }
+  
   display.display();
   delay(200);
 }
