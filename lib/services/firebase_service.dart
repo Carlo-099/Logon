@@ -32,6 +32,7 @@ class FirebaseService {
     required bool ultrasonic,
     required bool dfPlayer,
     required bool oled,
+    required String language,
   }) async {
     try {
       final userId = getCurrentUserId();
@@ -45,6 +46,7 @@ class FirebaseService {
         'ultrasonic': ultrasonic,
         'dfPlayer': dfPlayer,
         'oled': oled,
+        'language': language,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
     } catch (e) {
@@ -131,14 +133,22 @@ class FirebaseService {
     required bool motorEnabled,
     required bool ultrasonicEnabled,
     required bool audioEnabled,
+    String? language,
   }) async {
     try {
-      await _database.child('hardware_control').set({
+      final data = {
         'motorEnabled': motorEnabled,
         'ultrasonicEnabled': ultrasonicEnabled,
         'audioEnabled': audioEnabled,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
-      });
+      };
+      
+      // Add language if provided
+      if (language != null) {
+        data['language'] = language;
+      }
+      
+      await _database.child('hardware_control').set(data);
     } catch (e) {
       throw Exception("Failed to save hardware control: $e");
     }

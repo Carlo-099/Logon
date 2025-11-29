@@ -18,6 +18,9 @@ class _ProfilingPageState extends State<ProfilingPage> {
   bool _ultrasonic = false;
   bool _dfPlayer = false;
   bool _oled = false;
+  
+  // Language preference (default: Tagalog)
+  String _language = 'tagalog'; // 'tagalog' or 'english'
 
   bool _isLoading = false;
   bool _isLoadingData = true;
@@ -41,6 +44,7 @@ class _ProfilingPageState extends State<ProfilingPage> {
           _ultrasonic = data['ultrasonic'] ?? false;
           _dfPlayer = data['dfPlayer'] ?? false;
           _oled = data['oled'] ?? false;
+          _language = data['language'] ?? 'tagalog'; // Default to Tagalog
         });
       }
     } catch (e) {
@@ -80,6 +84,7 @@ class _ProfilingPageState extends State<ProfilingPage> {
         ultrasonic: _ultrasonic,
         dfPlayer: _dfPlayer,
         oled: _oled,
+        language: _language,
       );
 
       // Also save hardware control based on profiling settings
@@ -87,6 +92,7 @@ class _ProfilingPageState extends State<ProfilingPage> {
         motorEnabled: _dcMotor,
         ultrasonicEnabled: _ultrasonic,
         audioEnabled: _dfPlayer,
+        language: _language,
       );
 
       if (mounted) {
@@ -184,6 +190,46 @@ class _ProfilingPageState extends State<ProfilingPage> {
                   }
                   return null;
                 },
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Language Preference',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                margin: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  children: [
+                    RadioListTile<String>(
+                      title: const Text('Tagalog'),
+                      value: 'tagalog',
+                      groupValue: _language,
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() {
+                            _language = value;
+                          });
+                        }
+                      },
+                    ),
+                    RadioListTile<String>(
+                      title: const Text('English'),
+                      value: 'english',
+                      groupValue: _language,
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() {
+                            _language = value;
+                          });
+                        }
+                      },
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 32),
               const Text(
