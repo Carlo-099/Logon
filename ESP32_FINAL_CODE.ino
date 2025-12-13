@@ -73,6 +73,10 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define WIFI_SSID "PLDTHOMEFIBRsyhhi"
 #define WIFI_PASSWORD "PLDTWIFIkyzbp"
 
+// Hotspot ng smartphone (ACTIVE)
+//#define WIFI_SSID "iPhone"
+//#define WIFI_PASSWORD "elle2025"
+
 // ===================== Firebase Configuration =====================
 // Note: Use the database URL without https:// and without trailing slash
 #define FIREBASE_HOST "login-4e779-default-rtdb.asia-southeast1.firebasedatabase.app"
@@ -116,8 +120,17 @@ unsigned long lastHardwareCheck = 0;
 bool motorEnabled = false;        // Default to disabled until profiling enables it
 bool ultrasonicEnabled = false;   // Default to disabled until profiling enables it
 bool audioEnabled = false;        // Default to disabled until profiling enables it
-String userLanguage = "tagalog";  // Default language: "tagalog" or "english"
+String userLanguage = "tagalog";  // Default language: "tagalog", "english", "filipino", or "none"
+String usageLocation = "outdoors"; // "indoors" or "outdoors" - affects sensing distance
+String vibrationIntensity = "medium"; // "low", "medium", "high" - affects motor PWM
+String volume = "medium"; // "low", "medium", "high" - affects audio volume
 unsigned long lastLanguageCheck = 0;  // Track when we last checked language preference
+
+// Dynamic settings based on Firebase preferences
+int currentVibrationPWM = VIBRATION_MOTOR_PWM; // Will be adjusted based on vibrationIntensity
+float sensingDistanceMin = 50.0;  // Minimum distance for detection (adjusted based on usageLocation)
+float sensingDistanceMax = 100.0; // Maximum distance for detection (adjusted based on usageLocation)
+int audioVolume = 20; // DFPlayer volume (0-30, adjusted based on volume preference)
 
 // ===================== Connection Management =====================
 enum ConnectionType {
@@ -142,15 +155,15 @@ void motorStop() {
 void motorForwardContinuous() {
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
-  // Using reduced PWM to protect 3-5V vibration motor from 12V supply
-  analogWrite(ENA, VIBRATION_MOTOR_PWM);
+  // Using dynamic PWM based on vibration intensity preference
+  analogWrite(ENA, currentVibrationPWM);
 }
 
 void motorPulse() {
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
-  // Using reduced PWM to protect 3-5V vibration motor from 12V supply
-  analogWrite(ENA, VIBRATION_MOTOR_PWM);
+  // Using dynamic PWM based on vibration intensity preference
+  analogWrite(ENA, currentVibrationPWM);
   delay(300);
   analogWrite(ENA, 0);
   delay(300);
@@ -171,7 +184,7 @@ void motorControlByDistance(float dist) {
   
   if (dist <= 50) {  // At 0.5 meters (50cm) or closer
     // Continuous vibration
-    analogWrite(ENA, VIBRATION_MOTOR_PWM);
+    analogWrite(ENA, currentVibrationPWM);
     // Log only when entering this range or every 2 seconds
     if (lastLoggedDist > 50 || millis() - lastMotorLog > 2000) {
       Serial.print("🔔 Motor: Continuous vibration (");
@@ -186,7 +199,7 @@ void motorControlByDistance(float dist) {
     if (currentTime - lastMotorPulse >= 150) {  // Fast pulse every 150ms
       motorPulseState = !motorPulseState;
       if (motorPulseState) {
-        analogWrite(ENA, VIBRATION_MOTOR_PWM);
+        analogWrite(ENA, currentVibrationPWM);
       } else {
         analogWrite(ENA, 0);
       }
@@ -212,15 +225,20 @@ void motorControlByDistance(float dist) {
 
 // ===================== Audio Language Helper =====================
 // Maps audio file numbers based on language preference
-// Tagalog: 001, 002, 003
+// Tagalog/Filipino: 001, 002, 003
 // English: 004, 005, 006
+// Returns 0 if language is "none" (no audio)
 int getAudioFileNumber(int baseFile) {
   // baseFile should be 1, 2, or 3 (for Tagalog files 001, 002, 003)
-  if (userLanguage == "english") {
+  if (userLanguage == "none") {
+    // No audio - return 0
+    return 0;
+  } else if (userLanguage == "english") {
     // English files: 004, 005, 006 (baseFile + 3)
     return baseFile + 3;
   } else {
-    // Tagalog files: 001, 002, 003 (default)
+    // Tagalog/Filipino files: 001, 002, 003 (default)
+    // "filipino" is treated the same as "tagalog"
     return baseFile;
   }
 }
@@ -916,11 +934,73 @@ void pollHardwareControl() {
     Serial.println("🌐 Language changed: " + userLanguage + " → " + newLanguage);
     userLanguage = newLanguage;
   }
+  
+  // Read usage location (affects sensing distance)
+  String newUsageLocation = doc["usageLocation"] | usageLocation;
+  if (newUsageLocation != usageLocation) {
+    Serial.println("📍 Usage location changed: " + usageLocation + " → " + newUsageLocation);
+    usageLocation = newUsageLocation;
+    // Adjust sensing distance based on location
+    if (usageLocation == "indoors") {
+      // Indoors: shorter range (30-80cm)
+      sensingDistanceMin = 30.0;
+      sensingDistanceMax = 80.0;
+    } else {
+      // Outdoors: longer range (50-100cm)
+      sensingDistanceMin = 50.0;
+      sensingDistanceMax = 100.0;
+    }
+    Serial.print("   Sensing range updated: ");
+    Serial.print(sensingDistanceMin);
+    Serial.print("-");
+    Serial.print(sensingDistanceMax);
+    Serial.println("cm");
+  }
+  
+  // Read vibration intensity (affects motor PWM)
+  String newVibrationIntensity = doc["vibrationIntensity"] | vibrationIntensity;
+  if (newVibrationIntensity != vibrationIntensity) {
+    Serial.println("🔔 Vibration intensity changed: " + vibrationIntensity + " → " + newVibrationIntensity);
+    vibrationIntensity = newVibrationIntensity;
+    // Adjust motor PWM based on intensity
+    if (vibrationIntensity == "low") {
+      currentVibrationPWM = 60;  // ~2.8V equivalent
+    } else if (vibrationIntensity == "high") {
+      currentVibrationPWM = 120; // ~5.6V equivalent (max safe for 3-5V motor)
+    } else {
+      currentVibrationPWM = VIBRATION_MOTOR_PWM; // Medium: default 90
+    }
+    Serial.print("   Motor PWM updated: ");
+    Serial.println(currentVibrationPWM);
+  }
+  
+  // Read volume preference (affects DFPlayer volume)
+  String newVolume = doc["volume"] | volume;
+  if (newVolume != volume) {
+    Serial.println("🔊 Volume changed: " + volume + " → " + newVolume);
+    volume = newVolume;
+    // Adjust DFPlayer volume (0-30 range)
+    if (volume == "low") {
+      audioVolume = 10;
+    } else if (volume == "high") {
+      audioVolume = 30;
+    } else {
+      audioVolume = 20; // Medium
+    }
+    if (dfPlayerReady) {
+      player.volume(audioVolume);
+    }
+    Serial.print("   Audio volume updated: ");
+    Serial.println(audioVolume);
+  }
 
   Serial.println("   motorEnabled = " + String(newMotorEnabled ? "true" : "false"));
   Serial.println("   ultrasonicEnabled = " + String(newUltrasonicEnabled ? "true" : "false"));
   Serial.println("   audioEnabled = " + String(newAudioEnabled ? "true" : "false"));
   Serial.println("   language = " + userLanguage);
+  Serial.println("   usageLocation = " + usageLocation);
+  Serial.println("   vibrationIntensity = " + vibrationIntensity);
+  Serial.println("   volume = " + volume);
 
     bool valuesChanged = (motorEnabled != newMotorEnabled || 
                          ultrasonicEnabled != newUltrasonicEnabled || 
@@ -995,7 +1075,7 @@ void setup() {
   // DFPlayer init (initialize only, don't play yet - will play after language is read)
   dfSerial.begin(9600, SERIAL_8N1, 13, 14); //DF_RX, DF_TX
   if (player.begin(dfSerial)) {
-    player.volume(30);
+    player.volume(audioVolume);  // Use dynamic volume based on preference
     dfPlayerReady = true;
     Serial.println("✅ DFPlayer initialized (will play startup audio after language is loaded)");
   } else {
@@ -1191,28 +1271,39 @@ void setup() {
     lang.toLowerCase();
     if (lang == "english") {
       userLanguage = "english";
+    } else if (lang == "filipino" || lang == "tagalog") {
+      userLanguage = "tagalog";  // Treat filipino same as tagalog
+    } else if (lang == "none") {
+      userLanguage = "none";
     } else {
-      userLanguage = "tagalog";
+      userLanguage = "tagalog";  // Default
     }
-
-    // Also refresh other hardware control flags (motor/audio, etc.)
+    
+    // Also initialize other settings from Firebase if available
+    // This will read usageLocation, vibrationIntensity, volume, and hardware control flags
     pollHardwareControl();
     
-    // Now play startup audio with correct language
-    if (dfPlayerReady) {
-      int startupFile = getAudioFileNumber(1); // Get correct file based on language (001 or 004)
-      player.playFolder(1, startupFile);
-      startupAudioPlayed = true;
-      startupAudioTime = millis();
-      Serial.print("✅ DFPlayer: Playing startup audio ");
-      Serial.print(startupFile < 10 ? "00" : "0");
-      Serial.print(startupFile);
-      Serial.print(".mp3 (");
-      Serial.print(userLanguage);
-      Serial.println(")");
-    } else {
-      Serial.println("⚠️ DFPlayer not ready, skipping startup audio");
-    }
+     // Now play startup audio with correct language
+     if (dfPlayerReady) {
+       int startupFile = getAudioFileNumber(1); // Get correct file based on language (001 or 004)
+       if (startupFile > 0) {  // Only play if language is not "none"
+         player.playFolder(1, startupFile);
+         startupAudioPlayed = true;
+         startupAudioTime = millis();
+         Serial.print("✅ DFPlayer: Playing startup audio ");
+         Serial.print(startupFile < 10 ? "00" : "0");
+         Serial.print(startupFile);
+         Serial.print(".mp3 (");
+         Serial.print(userLanguage);
+         Serial.println(")");
+       } else {
+         Serial.println("⚠️ Language is 'none' - skipping startup audio");
+         startupAudioPlayed = true;  // Mark as played so system can continue
+         startupAudioTime = millis();
+       }
+     } else {
+       Serial.println("⚠️ DFPlayer not ready, skipping startup audio");
+     }
     
     display.clearDisplay();
     display.setCursor(0, 0);
@@ -1223,21 +1314,27 @@ void setup() {
     // WiFi/Firebase connection failed - play default Tagalog startup audio
     Serial.println();
     Serial.println("⚠️ WiFi/Firebase not connected - using default language (Tagalog)");
-    userLanguage = "tagalog";
-    if (dfPlayerReady) {
-      int startupFile = getAudioFileNumber(1); // Will use default "tagalog" = 001.mp3
-      player.playFolder(1, startupFile);
-      startupAudioPlayed = true;
-      startupAudioTime = millis();
-      Serial.print("✅ DFPlayer: Playing startup audio ");
-      Serial.print(startupFile < 10 ? "00" : "0");
-      Serial.print(startupFile);
-      Serial.print(".mp3 (default: ");
-      Serial.print(userLanguage);
-      Serial.println(")");
-    } else {
-      Serial.println("⚠️ DFPlayer not ready, skipping startup audio (no WiFi/Firebase)");
-    }
+     userLanguage = "tagalog";
+     if (dfPlayerReady) {
+       int startupFile = getAudioFileNumber(1); // Will use default "tagalog" = 001.mp3
+       if (startupFile > 0) {  // Only play if language is not "none"
+         player.playFolder(1, startupFile);
+         startupAudioPlayed = true;
+         startupAudioTime = millis();
+         Serial.print("✅ DFPlayer: Playing startup audio ");
+         Serial.print(startupFile < 10 ? "00" : "0");
+         Serial.print(startupFile);
+         Serial.print(".mp3 (default: ");
+         Serial.print(userLanguage);
+         Serial.println(")");
+       } else {
+         Serial.println("⚠️ Language is 'none' - skipping startup audio (no WiFi/Firebase)");
+         startupAudioPlayed = true;  // Mark as played so system can continue
+         startupAudioTime = millis();
+       }
+     } else {
+       Serial.println("⚠️ DFPlayer not ready, skipping startup audio (no WiFi/Firebase)");
+     }
   }
 }
 
@@ -1425,99 +1522,128 @@ void loop() {
         Serial.print(distance);
         Serial.println(" cm");
         
-        // Audio control based on distance
-        // NEW LOGIC: Audio plays ONLY when distance >= 50cm AND <= 100cm
-        // Audio loops/continues as long as object is detected in this range
-        // Gate audio so that startup voice (001/004) can finish first
-        // Require: startupAudioPlayed == true AND at least 4 seconds since it started
-        if (audioEnabled && startupAudioPlayed && millis() - startupAudioTime > 4000) {
-          if (distance >= 50 && distance <= 100) {
-            // Object detected in valid range (50-100cm) - play audio (005 or 006) and LOOP
-            // Audio will continuously loop as long as object is detected in this range
-            if (currentAudioState != 1) {
-              int audioFile = getAudioFileNumber(3);  // Get correct file (003 or 006)
-              player.stop();  // Stop any currently playing audio first
-              delay(100);     // Small delay to ensure stop command is processed
-              player.loop(audioFile);  // Loop the audio file continuously (file in folder 01)
-              currentAudioState = 1;
-              Serial.print("🔊 Looping ");
-              Serial.print(audioFile < 10 ? "00" : "0");
-              Serial.print(audioFile);
-              Serial.print(".mp3 (object detected 50-100cm, ");
-              Serial.print(userLanguage);
-              Serial.println(") - will loop continuously while object detected");
-            }
-            // If audio is already looping, let it continue
-          } else {
-            // Object too close (< 50cm) or too far (> 100cm) - stop audio
-            if (currentAudioState != 0) {
-              player.stop();
-              currentAudioState = 0;
-              if (distance < 50) {
-                Serial.println("🔇 Audio stopped (object too close < 50cm)");
-              } else {
-                Serial.println("🔇 Audio stopped (object too far > 100cm)");
-              }
-            }
-          }
-        }
+         // Audio control based on distance
+         // First check: If audio is disabled, stop any playing audio
+         if (!audioEnabled && currentAudioState != 0) {
+           player.stop();
+           currentAudioState = 0;
+           Serial.println("🔇 Audio stopped (audio disabled in Firebase)");
+         }
+         // NEW LOGIC: Audio plays ONLY when distance is in sensing range (adjusted by usageLocation)
+         // Audio loops/continues as long as object is detected in this range
+         // Gate audio so that startup voice (001/004) can finish first
+         // Require: startupAudioPlayed == true AND at least 4 seconds since it started
+         if (audioEnabled && startupAudioPlayed && millis() - startupAudioTime > 4000) {
+           if (distance >= sensingDistanceMin && distance <= sensingDistanceMax) {
+             // Object detected in valid range - play audio (005 or 006) and LOOP
+             // Audio will continuously loop as long as object is detected in this range
+             if (currentAudioState != 1) {
+               int audioFile = getAudioFileNumber(3);  // Get correct file (003 or 006)
+               if (audioFile > 0) {  // Only play if language is not "none"
+                 player.stop();  // Stop any currently playing audio first
+                 delay(100);     // Small delay to ensure stop command is processed
+                 player.loop(audioFile);  // Loop the audio file continuously (file in folder 01)
+                 currentAudioState = 1;
+                 Serial.print("🔊 Looping ");
+                 Serial.print(audioFile < 10 ? "00" : "0");
+                 Serial.print(audioFile);
+                 Serial.print(".mp3 (object detected ");
+                 Serial.print(sensingDistanceMin);
+                 Serial.print("-");
+                 Serial.print(sensingDistanceMax);
+                 Serial.print("cm, ");
+                 Serial.print(userLanguage);
+                 Serial.println(") - will loop continuously while object detected");
+               } else {
+                 // Language is "none" - don't play audio
+                 currentAudioState = 0;
+               }
+             }
+             // If audio is already looping, let it continue
+           } else {
+             // Object too close or too far - stop audio
+             if (currentAudioState != 0) {
+               player.stop();
+               currentAudioState = 0;
+               if (distance < sensingDistanceMin) {
+                 Serial.print("🔇 Audio stopped (object too close < ");
+                 Serial.print(sensingDistanceMin);
+                 Serial.println("cm)");
+               } else {
+                 Serial.print("🔇 Audio stopped (object too far > ");
+                 Serial.print(sensingDistanceMax);
+                 Serial.println("cm)");
+               }
+             }
+           }
+         }
         
-        // Motor control based on distance ONLY
-        // NEW LOGIC: Motor vibrates ONLY when distance >= 50cm AND <= 100cm
-        // Motor stops when distance < 50cm (too close, ignore) or > 100cm (no object)
-        if (!motorEnabled) {
-          // Motor disabled in Firebase - always stop
-          motorStop();
-          motorPulseState = false;
-        } else if (distance < 50) {
-          // Object too close (< 50cm) - STOP motor (ignore close readings)
-          motorStop();
-          motorPulseState = false;
-          static unsigned long lastStopLog = 0;
-          if (millis() - lastStopLog > 2000) {  // Log every 2 seconds to avoid spam
-            Serial.print("🔔 Motor: Stopped (distance ");
-            Serial.print(distance);
-            Serial.println("cm < 50cm - too close, ignoring)");
-            lastStopLog = millis();
-          }
-        } else if (distance > 100) {
-          // No object detected (distance > 100cm) - STOP motor immediately
-          motorStop();
-          motorPulseState = false;
-          static unsigned long lastStopLog2 = 0;
-          if (millis() - lastStopLog2 > 2000) {  // Log every 2 seconds to avoid spam
-            Serial.print("🔔 Motor: Stopped (distance ");
-            Serial.print(distance);
-            Serial.println("cm > 100cm - no object)");
-            lastStopLog2 = millis();
-          }
-        } else if (distance >= 50 && distance <= 100) {
-          // Object detected in valid range (50-100cm) - VIBRATE
-          // Fast pulse for this range
-          unsigned long currentTime = millis();
-          if (currentTime - lastMotorPulse >= 150) {  // Fast pulse every 150ms
-            motorPulseState = !motorPulseState;
-            digitalWrite(IN1, HIGH);
-            digitalWrite(IN2, LOW);
-            if (motorPulseState) {
-              analogWrite(ENA, VIBRATION_MOTOR_PWM);
-            } else {
-              analogWrite(ENA, 0);
-            }
-            lastMotorPulse = currentTime;
-          }
-          static unsigned long lastVibrateLog = 0;
-          if (millis() - lastVibrateLog > 2000) {  // Log every 2 seconds
-            Serial.print("🔔 Motor: Fast pulse (distance ");
-            Serial.print(distance);
-            Serial.println("cm, 50-100cm range)");
-            lastVibrateLog = millis();
-          }
-        } else {
-          // Safety fallback: if distance is somehow not in expected range, stop motor
-          motorStop();
-          motorPulseState = false;
-        }
+         // Motor control based on distance ONLY
+         // NEW LOGIC: Motor vibrates ONLY when distance is in sensing range (adjusted by usageLocation)
+         // Motor stops when distance is outside the sensing range
+         if (!motorEnabled) {
+           // Motor disabled in Firebase - always stop
+           motorStop();
+           motorPulseState = false;
+         } else if (distance < sensingDistanceMin) {
+           // Object too close - STOP motor (ignore close readings)
+           motorStop();
+           motorPulseState = false;
+           static unsigned long lastStopLog = 0;
+           if (millis() - lastStopLog > 2000) {  // Log every 2 seconds to avoid spam
+             Serial.print("🔔 Motor: Stopped (distance ");
+             Serial.print(distance);
+             Serial.print("cm < ");
+             Serial.print(sensingDistanceMin);
+             Serial.println("cm - too close, ignoring)");
+             lastStopLog = millis();
+           }
+         } else if (distance > sensingDistanceMax) {
+           // No object detected (distance > max) - STOP motor immediately
+           motorStop();
+           motorPulseState = false;
+           static unsigned long lastStopLog2 = 0;
+           if (millis() - lastStopLog2 > 2000) {  // Log every 2 seconds to avoid spam
+             Serial.print("🔔 Motor: Stopped (distance ");
+             Serial.print(distance);
+             Serial.print("cm > ");
+             Serial.print(sensingDistanceMax);
+             Serial.println("cm - no object)");
+             lastStopLog2 = millis();
+           }
+         } else if (distance >= sensingDistanceMin && distance <= sensingDistanceMax) {
+           // Object detected in valid range - VIBRATE
+           // Fast pulse for this range, using dynamic PWM based on vibrationIntensity
+           unsigned long currentTime = millis();
+           if (currentTime - lastMotorPulse >= 150) {  // Fast pulse every 150ms
+             motorPulseState = !motorPulseState;
+             digitalWrite(IN1, HIGH);
+             digitalWrite(IN2, LOW);
+             if (motorPulseState) {
+               analogWrite(ENA, currentVibrationPWM);  // Use dynamic PWM
+             } else {
+               analogWrite(ENA, 0);
+             }
+             lastMotorPulse = currentTime;
+           }
+           static unsigned long lastVibrateLog = 0;
+           if (millis() - lastVibrateLog > 2000) {  // Log every 2 seconds
+             Serial.print("🔔 Motor: Fast pulse (distance ");
+             Serial.print(distance);
+             Serial.print("cm, ");
+             Serial.print(sensingDistanceMin);
+             Serial.print("-");
+             Serial.print(sensingDistanceMax);
+             Serial.print("cm range, PWM: ");
+             Serial.print(currentVibrationPWM);
+             Serial.println(")");
+             lastVibrateLog = millis();
+           }
+         } else {
+           // Safety fallback: if distance is somehow not in expected range, stop motor
+           motorStop();
+           motorPulseState = false;
+         }
       } else {
         // Invalid distance reading (distance < 2cm, <= 0, or >= 400cm) - NO OBJECT DETECTED
         // STOP motor immediately - this means no object is in range

@@ -25,14 +25,16 @@ class FirebaseService {
 
   // ===================== PROFILING METHODS =====================
   
-  // Save profiling data (hardware component settings)
+  // Save profiling data (questionnaire responses)
   Future<void> saveProfilingData({
     required String name,
-    required bool dcMotor,
-    required bool ultrasonic,
-    required bool dfPlayer,
-    required bool oled,
+    required String category,
+    required String usageLocation,
+    required bool handSensitivity,
+    required String vibrationIntensity,
+    required bool voiceAlertEnabled,
     required String language,
+    required String volume,
   }) async {
     try {
       final userId = getCurrentUserId();
@@ -42,11 +44,14 @@ class FirebaseService {
 
       await _database.child('profiling').child(userId).set({
         'name': name,
-        'dcMotor': dcMotor,
-        'ultrasonic': ultrasonic,
-        'dfPlayer': dfPlayer,
-        'oled': oled,
+        'category': category,
+        'usageLocation': usageLocation,
+        'handSensitivity': handSensitivity,
+        'vibrationIntensity': vibrationIntensity,
+        'voiceAlertEnabled': voiceAlertEnabled,
         'language': language,
+        'volume': volume,
+        'questionnaireCompleted': true,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
     } catch (e) {
@@ -134,6 +139,9 @@ class FirebaseService {
     required bool ultrasonicEnabled,
     required bool audioEnabled,
     String? language,
+    String? usageLocation,
+    String? vibrationIntensity,
+    String? volume,
   }) async {
     try {
       final data = {
@@ -143,9 +151,18 @@ class FirebaseService {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       };
       
-      // Add language if provided
+      // Add optional fields if provided
       if (language != null) {
         data['language'] = language;
+      }
+      if (usageLocation != null) {
+        data['usageLocation'] = usageLocation;
+      }
+      if (vibrationIntensity != null) {
+        data['vibrationIntensity'] = vibrationIntensity;
+      }
+      if (volume != null) {
+        data['volume'] = volume;
       }
       
       await _database.child('hardware_control').set(data);

@@ -13,17 +13,19 @@ class _ProfilingPageState extends State<ProfilingPage> {
   final _nameController = TextEditingController();
   final _firebaseService = FirebaseService();
 
-  // Hardware component states
-  bool _dcMotor = false;
-  bool _ultrasonic = false;
-  bool _dfPlayer = false;
-  bool _oled = false;
-  
-  // Language preference (default: Tagalog)
-  String _language = 'tagalog'; // 'tagalog' or 'english'
+  // Questionnaire state
+  String? _category; // 'elderly', 'blind', 'high-risk'
+  String? _usageLocation; // 'indoors', 'outdoors'
+  bool? _handSensitivity; // true = Yes, false = No
+  String? _vibrationIntensity; // 'low', 'medium', 'high'
+  bool? _voiceAlertEnabled; // true = Yes, false = No
+  String? _language; // 'english', 'filipino', 'none'
+  String? _volume; // 'low', 'medium', 'high'
 
+  int _currentStep = 0;
   bool _isLoading = false;
   bool _isLoadingData = true;
+  bool _questionnaireCompleted = false;
 
   @override
   void initState() {
@@ -33,27 +35,27 @@ class _ProfilingPageState extends State<ProfilingPage> {
 
   Future<void> _loadProfilingData() async {
     try {
-      // Add timeout to prevent infinite loading
       final data = await _firebaseService.getProfilingData()
           .timeout(const Duration(seconds: 10));
       
       if (data != null) {
         setState(() {
           _nameController.text = data['name'] ?? '';
-          _dcMotor = data['dcMotor'] ?? false;
-          _ultrasonic = data['ultrasonic'] ?? false;
-          _dfPlayer = data['dfPlayer'] ?? false;
-          _oled = data['oled'] ?? false;
-          _language = data['language'] ?? 'tagalog'; // Default to Tagalog
+          _category = data['category'];
+          _usageLocation = data['usageLocation'];
+          _handSensitivity = data['handSensitivity'];
+          _vibrationIntensity = data['vibrationIntensity'];
+          _voiceAlertEnabled = data['voiceAlertEnabled'];
+          _language = data['language'];
+          _volume = data['volume'];
+          _questionnaireCompleted = data['questionnaireCompleted'] ?? false;
         });
       }
     } catch (e) {
-      // If error occurs (including timeout), just show the form empty
-      // This allows user to create new profile even if database read fails
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Note: Could not load existing data. You can create a new profile. Error: $e"),
+            content: Text("Note: Could not load existing data. Error: $e"),
             backgroundColor: Colors.orange,
             duration: const Duration(seconds: 3),
           ),
@@ -73,27 +75,89 @@ class _ProfilingPageState extends State<ProfilingPage> {
       return;
     }
 
+    // Validate required fields based on flow
+    if (_category == null) {
+      _showError("Please select a category");
+      return;
+    }
+
+    if (_usageLocation == null) {
+      _showError("Please select where you often use the cane");
+      return;
+    }
+
+    if (_handSensitivity == null) {
+      _showError("Please answer the hand sensitivity question");
+      return;
+    }
+
+    // If hand sensitivity is Yes, end here
+    if (_handSensitivity == true) {
+      await _saveToFirebase();
+      return;
+    }
+
+    if (_vibrationIntensity == null) {
+      _showError("Please select vibration intensity preference");
+      return;
+    }
+
+    if (_voiceAlertEnabled == null) {
+      _showError("Please answer the voice alert preference question");
+      return;
+    }
+
+    // If voice alert is No, end here
+    if (_voiceAlertEnabled == false) {
+      await _saveToFirebase();
+      return;
+    }
+
+    if (_language == null) {
+      _showError("Please select preferred language");
+      return;
+    }
+
+    if (_volume == null) {
+      _showError("Please select voice alert volume preference");
+      return;
+    }
+
+    await _saveToFirebase();
+  }
+
+  Future<void> _saveToFirebase() async {
     setState(() {
       _isLoading = true;
     });
 
     try {
+      // Save profiling data
       await _firebaseService.saveProfilingData(
         name: _nameController.text.trim(),
-        dcMotor: _dcMotor,
-        ultrasonic: _ultrasonic,
-        dfPlayer: _dfPlayer,
-        oled: _oled,
-        language: _language,
+        category: _category!,
+        usageLocation: _usageLocation!,
+        handSensitivity: _handSensitivity ?? false,
+        vibrationIntensity: _vibrationIntensity ?? 'medium',
+        voiceAlertEnabled: _voiceAlertEnabled ?? false,
+        language: _language ?? 'none',
+        volume: _volume ?? 'medium',
       );
 
-      // Also save hardware control based on profiling settings
+      // Save hardware control settings for ESP32
       await _firebaseService.saveHardwareControl(
-        motorEnabled: _dcMotor,
-        ultrasonicEnabled: _ultrasonic,
-        audioEnabled: _dfPlayer,
-        language: _language,
+        motorEnabled: _handSensitivity == false, // Enable motor only if no hand sensitivity
+        ultrasonicEnabled: true, // Always enabled
+        audioEnabled: _voiceAlertEnabled == true, // Enable only if voice alert is Yes
+        language: _language ?? 'none',
+        usageLocation: _usageLocation!,
+        vibrationIntensity: _vibrationIntensity ?? 'medium',
+        volume: _volume ?? 'medium',
       );
+
+      setState(() {
+        _questionnaireCompleted = true;
+      });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -121,44 +185,399 @@ class _ProfilingPageState extends State<ProfilingPage> {
     }
   }
 
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  void _nextStep() {
+    if (_currentStep == 0 && _category == null) {
+      _showError("Please select a category");
+      return;
+    }
+    if (_currentStep == 1 && _usageLocation == null) {
+      _showError("Please select where you often use the cane");
+      return;
+    }
+    if (_currentStep == 2 && _handSensitivity == null) {
+      _showError("Please answer the hand sensitivity question");
+      return;
+    }
+    // If hand sensitivity is Yes, should have already saved and ended
+    if (_currentStep == 2 && _handSensitivity == true) {
+      // This should not happen as it auto-saves, but just in case
+      _saveProfilingData();
+      return;
+    }
+    if (_currentStep == 3 && _vibrationIntensity == null) {
+      _showError("Please select vibration intensity");
+      return;
+    }
+    if (_currentStep == 4 && _voiceAlertEnabled == null) {
+      _showError("Please answer the voice alert question");
+      return;
+    }
+    // If voice alert is No, should have already saved and ended
+    if (_currentStep == 4 && _voiceAlertEnabled == false) {
+      // This should not happen as it auto-saves, but just in case
+      _saveProfilingData();
+      return;
+    }
+    if (_currentStep == 5 && _language == null) {
+      _showError("Please select preferred language");
+      return;
+    }
+    if (_currentStep == 6 && _volume == null) {
+      _showError("Please select volume preference");
+      return;
+    }
+
+    setState(() {
+      _currentStep++;
+    });
+  }
+
+  void _previousStep() {
+    if (_currentStep > 0) {
+      setState(() {
+        _currentStep--;
+      });
+    }
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
     super.dispose();
   }
 
-  Widget _buildYesNoSwitch(String label, bool value, Function(bool) onChanged) {
+  Widget _buildCategorySelection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Select Your Category',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 24),
+        _buildRadioOption(
+          'Elderly',
+          'elderly',
+          _category,
+          (value) => setState(() => _category = value),
+        ),
+        const SizedBox(height: 12),
+        _buildRadioOption(
+          'Blind',
+          'blind',
+          _category,
+          (value) => setState(() => _category = value),
+        ),
+        const SizedBox(height: 12),
+        _buildRadioOption(
+          'High-Risk',
+          'high-risk',
+          _category,
+          (value) => setState(() => _category = value),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUsageLocation() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Where do you often use the cane?',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 24),
+        _buildRadioOption(
+          'Indoors',
+          'indoors',
+          _usageLocation,
+          (value) => setState(() => _usageLocation = value),
+        ),
+        const SizedBox(height: 12),
+        _buildRadioOption(
+          'Outdoors',
+          'outdoors',
+          _usageLocation,
+          (value) => setState(() => _usageLocation = value),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHandSensitivity() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Do you have any sensitivity in your hands that would make vibration uncomfortable?',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 24),
+        _buildRadioOption(
+          'Yes',
+          'yes',
+          _handSensitivity == true ? 'yes' : (_handSensitivity == false ? 'no' : null),
+          (value) {
+            setState(() => _handSensitivity = value == 'yes');
+            // If Yes is selected, automatically save and end questionnaire
+            if (value == 'yes') {
+              Future.delayed(const Duration(milliseconds: 300), () {
+                _saveProfilingData();
+              });
+            }
+          },
+        ),
+        const SizedBox(height: 12),
+        _buildRadioOption(
+          'No',
+          'no',
+          _handSensitivity == true ? 'yes' : (_handSensitivity == false ? 'no' : null),
+          (value) => setState(() => _handSensitivity = value == 'yes'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVibrationIntensity() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Vibration Intensity Preference',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 24),
+        _buildRadioOption(
+          'Low',
+          'low',
+          _vibrationIntensity,
+          (value) => setState(() => _vibrationIntensity = value),
+        ),
+        const SizedBox(height: 12),
+        _buildRadioOption(
+          'Medium',
+          'medium',
+          _vibrationIntensity,
+          (value) => setState(() => _vibrationIntensity = value),
+        ),
+        const SizedBox(height: 12),
+        _buildRadioOption(
+          'High',
+          'high',
+          _vibrationIntensity,
+          (value) => setState(() => _vibrationIntensity = value),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVoiceAlertPreference() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Do you prefer a voice alert?',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 24),
+        _buildRadioOption(
+          'Yes',
+          'yes',
+          _voiceAlertEnabled == true ? 'yes' : (_voiceAlertEnabled == false ? 'no' : null),
+          (value) => setState(() => _voiceAlertEnabled = value == 'yes'),
+        ),
+        const SizedBox(height: 12),
+        _buildRadioOption(
+          'No',
+          'no',
+          _voiceAlertEnabled == true ? 'yes' : (_voiceAlertEnabled == false ? 'no' : null),
+          (value) {
+            setState(() => _voiceAlertEnabled = value == 'yes');
+            // If No is selected, automatically save and end questionnaire
+            if (value == 'no') {
+              Future.delayed(const Duration(milliseconds: 300), () {
+                _saveProfilingData();
+              });
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLanguageSelection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Preferred Language for Voice Alert',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 24),
+        _buildRadioOption(
+          'English',
+          'english',
+          _language,
+          (value) => setState(() => _language = value),
+        ),
+        const SizedBox(height: 12),
+        _buildRadioOption(
+          'Filipino',
+          'filipino',
+          _language,
+          (value) => setState(() => _language = value),
+        ),
+        const SizedBox(height: 12),
+        _buildRadioOption(
+          'None',
+          'none',
+          _language,
+          (value) => setState(() => _language = value),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVolumeSelection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Voice Alert Volume Preference',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 24),
+        _buildRadioOption(
+          'Low',
+          'low',
+          _volume,
+          (value) => setState(() => _volume = value),
+        ),
+        const SizedBox(height: 12),
+        _buildRadioOption(
+          'Medium',
+          'medium',
+          _volume,
+          (value) => setState(() => _volume = value),
+        ),
+        const SizedBox(height: 12),
+        _buildRadioOption(
+          'High',
+          'high',
+          _volume,
+          (value) => setState(() => _volume = value),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRadioOption(String title, String value, String? groupValue, Function(String) onChanged) {
     return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-      child: ListTile(
-        title: Text(
-          label,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-        ),
-        trailing: Switch(
-          value: value,
-          onChanged: onChanged,
-        ),
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: RadioListTile<String>(
+        title: Text(title),
+        value: value,
+        groupValue: groupValue,
+        onChanged: (val) => onChanged(val!),
       ),
     );
+  }
+
+  Widget _buildCurrentStep() {
+    switch (_currentStep) {
+      case 0:
+        return _buildCategorySelection();
+      case 1:
+        return _buildUsageLocation();
+      case 2:
+        return _buildHandSensitivity();
+      case 3:
+        return _buildVibrationIntensity();
+      case 4:
+        return _buildVoiceAlertPreference();
+      case 5:
+        return _buildLanguageSelection();
+      case 6:
+        return _buildVolumeSelection();
+      default:
+        return const SizedBox();
+    }
+  }
+
+  String _getStepTitle() {
+    switch (_currentStep) {
+      case 0:
+        return 'Category Selection';
+      case 1:
+        return 'Usage Location';
+      case 2:
+        return 'Hand Sensitivity';
+      case 3:
+        return 'Vibration Intensity';
+      case 4:
+        return 'Voice Alert Preference';
+      case 5:
+        return 'Language Selection';
+      case 6:
+        return 'Volume Preference';
+      default:
+        return '';
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isLoadingData) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text('Profiling'),
-        ),
-        body: const Center(
-          child: CircularProgressIndicator(),
+        appBar: AppBar(title: const Text('Profiling')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_questionnaireCompleted) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Profiling')),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.check_circle, color: Colors.green, size: 80),
+              const SizedBox(height: 24),
+              const Text(
+                'Questionnaire Completed!',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              const Text('Your preferences have been saved.'),
+              const SizedBox(height: 32),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    _questionnaireCompleted = false;
+                    _currentStep = 0;
+                  });
+                },
+                child: const Text('Edit Preferences'),
+              ),
+            ],
+          ),
         ),
       );
     }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Profiling'),
+        title: Text('Profiling - ${_getStepTitle()}'),
       ),
       body: Form(
         key: _formKey,
@@ -167,129 +586,101 @@ class _ProfilingPageState extends State<ProfilingPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'User Information',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _nameController,
-                decoration: InputDecoration(
-                  labelText: 'Name',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
+              // Name field (only on first step)
+              if (_currentStep == 0) ...[
+                TextFormField(
+                  controller: _nameController,
+                  decoration: InputDecoration(
+                    labelText: 'Name',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    prefixIcon: const Icon(Icons.person),
                   ),
-                  prefixIcon: const Icon(Icons.person),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Please enter your name';
+                    }
+                    return null;
+                  },
                 ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Please enter your name';
-                  }
-                  return null;
-                },
+                const SizedBox(height: 24),
+              ],
+              // Progress indicator
+              LinearProgressIndicator(
+                value: (_currentStep + 1) / 7,
+                backgroundColor: Colors.grey[300],
+                valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Step ${_currentStep + 1} of 7',
+                style: TextStyle(color: Colors.grey[600]),
+                textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
-              const Text(
-                'Language Preference',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Card(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  children: [
-                    RadioListTile<String>(
-                      title: const Text('Tagalog'),
-                      value: 'tagalog',
-                      groupValue: _language,
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() {
-                            _language = value;
-                          });
-                        }
-                      },
-                    ),
-                    RadioListTile<String>(
-                      title: const Text('English'),
-                      value: 'english',
-                      groupValue: _language,
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() {
-                            _language = value;
-                          });
-                        }
-                      },
-                    ),
-                  ],
-                ),
-              ),
+              // Current step content
+              _buildCurrentStep(),
               const SizedBox(height: 32),
-              const Text(
-                'Hardware Components',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Enable or disable hardware components:',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey,
-                ),
-              ),
-              const SizedBox(height: 16),
-              _buildYesNoSwitch(
-                'DC Motor',
-                _dcMotor,
-                (value) => setState(() => _dcMotor = value),
-              ),
-              _buildYesNoSwitch(
-                'Ultrasonic Sensor',
-                _ultrasonic,
-                (value) => setState(() => _ultrasonic = value),
-              ),
-              _buildYesNoSwitch(
-                'DFPlayer (Audio)',
-                _dfPlayer,
-                (value) => setState(() => _dfPlayer = value),
-              ),
-              _buildYesNoSwitch(
-                'OLED Display',
-                _oled,
-                (value) => setState(() => _oled = value),
-              ),
-              const SizedBox(height: 32),
-              ElevatedButton(
-                onPressed: _isLoading ? null : _saveProfilingData,
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: _isLoading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text(
-                        'Save Profiling',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+              // Navigation buttons
+              // Hide Next button if:
+              // - Hand Sensitivity is Yes (step 2) - will auto-save
+              // - Voice Alert is No (step 4) - will auto-save
+              // - Currently saving
+              Builder(
+                builder: (context) {
+                  bool shouldHideNext = _isLoading ||
+                      (_currentStep == 2 && _handSensitivity == true) ||
+                      (_currentStep == 4 && _voiceAlertEnabled == false);
+                  
+                  if (shouldHideNext && _isLoading) {
+                    return const Center(
+                      child: Column(
+                        children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 16),
+                          Text(
+                            'Saving your preferences...',
+                            style: TextStyle(fontSize: 16, color: Colors.grey),
+                          ),
+                        ],
                       ),
+                    );
+                  } else if (!shouldHideNext) {
+                    return Row(
+                      children: [
+                        if (_currentStep > 0)
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _previousStep,
+                              child: const Text('Previous'),
+                            ),
+                          ),
+                        if (_currentStep > 0) const SizedBox(width: 16),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : () {
+                              if (_currentStep == 6) {
+                                _saveProfilingData();
+                              } else {
+                                _nextStep();
+                              }
+                            },
+                            child: _isLoading
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : Text(_currentStep == 6 ? 'Save' : 'Next'),
+                          ),
+                        ),
+                      ],
+                    );
+                  } else {
+                    return const SizedBox.shrink();
+                  }
+                },
               ),
             ],
           ),
@@ -298,4 +689,3 @@ class _ProfilingPageState extends State<ProfilingPage> {
     );
   }
 }
-
