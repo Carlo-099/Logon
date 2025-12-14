@@ -44,11 +44,12 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define IN2 27
 
 // ===================== Vibration Motor PWM Control =====================
-// Vibration motor rated: 3-5V
-// L298N power supply: 12V
-// PWM calculation: To get ~4V from 12V = 4/12 = 33% = 84/255
-// Using 90/255 = 35% = ~4.2V equivalent (safe for 3-5V motor)
-#define VIBRATION_MOTOR_PWM 90  // Adjust if vibration is too weak (increase) or too strong (decrease)
+// COIN VIBRATION MOTOR (like smartphone vibration)
+// Coin motors typically need higher PWM or direct ON/OFF
+// If using L298N: PWM 180-255 works better for coin motors
+// If using direct drive (transistor/MOSFET): Use digital ON/OFF or PWM 200-255
+#define VIBRATION_MOTOR_PWM 200  // Increased for coin motor (was 90, now 200 for better response)
+#define USE_COIN_MOTOR_MODE 1    // Set to 1 for coin motor (higher PWM), 0 for regular DC motor
 
 // ===================== Ultrasonic Sensor Thresholds =====================
 // HC-SR04 ultrasonic sensors are not accurate below 2cm
@@ -105,6 +106,7 @@ float distance;
 float filteredDistance = 0.0;  // Filtered/averaged distance for stability
 int currentAudioState = 0;          // 0 = none, 1 = 002.mp3, 2 = 003.mp3
 bool dfPlayerReady = false;         // Track if DFPlayer is initialized and ready
+bool oledReady = false;              // Track if OLED display is initialized and ready
 bool startupAudioPlayed = false;    // Track if startup audio (001/004) has been played
 unsigned long startupAudioTime = 0; // When startup audio started (for timing/gating)
 bool ultrasonicEnabledAfterDelay = false; // Prevent ultrasonic from running during startup audio
@@ -117,6 +119,7 @@ bool systemReady = false;
 // ===================== Firebase Control Variables =====================
 unsigned long lastGPSUpdate = 0;
 unsigned long lastHardwareCheck = 0;
+unsigned long lastRestartTime = 0;  // Track when we last restarted to prevent restart loops
 bool motorEnabled = false;        // Default to disabled until profiling enables it
 bool ultrasonicEnabled = false;   // Default to disabled until profiling enables it
 bool audioEnabled = false;        // Default to disabled until profiling enables it
@@ -127,10 +130,23 @@ String volume = "medium"; // "low", "medium", "high" - affects audio volume
 unsigned long lastLanguageCheck = 0;  // Track when we last checked language preference
 
 // Dynamic settings based on Firebase preferences
-int currentVibrationPWM = VIBRATION_MOTOR_PWM; // Will be adjusted based on vibrationIntensity
+// Initialize PWM based on coin motor mode
+#if USE_COIN_MOTOR_MODE
+int currentVibrationPWM = 200;  // Default for coin motor
+#else
+int currentVibrationPWM = VIBRATION_MOTOR_PWM; // Default for regular motor
+#endif
 float sensingDistanceMin = 50.0;  // Minimum distance for detection (adjusted based on usageLocation)
 float sensingDistanceMax = 100.0; // Maximum distance for detection (adjusted based on usageLocation)
 int audioVolume = 20; // DFPlayer volume (0-30, adjusted based on volume preference)
+
+// ===================== GPS Update Interval =====================
+// GPS update frequency to Firebase (for real-time tracking on Google Maps)
+// Options:
+//   1000 = 1 second (recommended - real-time, GPS modules update at 1Hz)
+//   100  = 0.1 seconds (very fast, may overload Firebase, GPS may not update this fast)
+//   5000 = 5 seconds (original - less frequent, saves data/bandwidth)
+const unsigned long GPS_UPDATE_INTERVAL = 1000;  // Update every 1 second (real-time)
 
 // ===================== Connection Management =====================
 enum ConnectionType {
@@ -150,6 +166,59 @@ void motorStop() {
   analogWrite(ENA, 0);
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, LOW);
+}
+
+// Motor test function - call this to test if motor is working
+void testMotor() {
+  Serial.println("========================================");
+  Serial.println("🧪 TESTING VIBRATION MOTOR");
+  Serial.println("========================================");
+  Serial.print("   Motor Type: ");
+  Serial.println(USE_COIN_MOTOR_MODE ? "COIN MOTOR" : "REGULAR DC MOTOR");
+  Serial.print("   Current PWM: ");
+  Serial.print(currentVibrationPWM);
+  Serial.println("/255");
+  Serial.println("   Testing motor for 3 seconds...");
+  
+  // Test 1: Low intensity
+  Serial.println("   Test 1: Low intensity (PWM 150)...");
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, 150);
+  delay(1000);
+  analogWrite(ENA, 0);
+  delay(500);
+  
+  // Test 2: Medium intensity
+  Serial.println("   Test 2: Medium intensity (PWM 200)...");
+  analogWrite(ENA, 200);
+  delay(1000);
+  analogWrite(ENA, 0);
+  delay(500);
+  
+  // Test 3: High intensity
+  Serial.println("   Test 3: High intensity (PWM 255)...");
+  analogWrite(ENA, 255);
+  delay(1000);
+  analogWrite(ENA, 0);
+  
+  // Test 4: Pulse pattern
+  Serial.println("   Test 4: Pulse pattern (5 pulses)...");
+  for (int i = 0; i < 5; i++) {
+    analogWrite(ENA, currentVibrationPWM);
+    delay(200);
+    analogWrite(ENA, 0);
+    delay(200);
+  }
+  
+  motorStop();
+  Serial.println("✅ Motor test complete!");
+  Serial.println("   Did you feel vibration? If NO, check:");
+  Serial.println("   1. Wiring (ENA, IN1, IN2)");
+  Serial.println("   2. Power supply to L298N");
+  Serial.println("   3. Motor connected to L298N output");
+  Serial.println("   4. Try increasing PWM values if too weak");
+  Serial.println("========================================");
 }
 
 void motorForwardContinuous() {
@@ -929,10 +998,27 @@ void pollHardwareControl() {
   bool newAudioEnabled = doc["audioEnabled"] | audioEnabled;
   
   // Read language preference (default to "tagalog" if not set)
-  String newLanguage = doc["language"] | "tagalog";
+  String newLanguage = "tagalog";  // Default
+  if (doc.containsKey("language")) {
+    newLanguage = doc["language"].as<String>();
+  }
+  // Normalize to lowercase and handle variations
+  newLanguage.toLowerCase();
+  if (newLanguage == "english") {
+    newLanguage = "english";
+  } else if (newLanguage == "filipino" || newLanguage == "tagalog") {
+    newLanguage = "tagalog";  // Treat filipino same as tagalog
+  } else if (newLanguage == "none") {
+    newLanguage = "none";
+  } else {
+    newLanguage = "tagalog";  // Default fallback
+  }
+  
   if (newLanguage != userLanguage) {
     Serial.println("🌐 Language changed: " + userLanguage + " → " + newLanguage);
     userLanguage = newLanguage;
+    // If audio is currently playing, we might want to restart it with new language
+    // But for now, just log the change - next detection will use new language
   }
   
   // Read usage location (affects sensing distance)
@@ -957,21 +1043,84 @@ void pollHardwareControl() {
     Serial.println("cm");
   }
   
+  // Check for restart request (only if we haven't restarted recently to prevent loops)
+  if (doc.containsKey("restartRequested") && doc["restartRequested"] == true) {
+    // Prevent restart loop: only restart if it's been more than 10 seconds since last restart
+    if (millis() - lastRestartTime < 10000) {
+      Serial.println("⚠️ Restart requested but ignored (too soon after last restart - preventing loop)");
+      // Still clear the flag to prevent future restarts
+      String clearUrl = String("/hardware_control/restartRequested.json?auth=") + FIREBASE_AUTH;
+      String clearData = "false";
+      if (currentConnection == CONN_WIFI) {
+        WiFiClientSecure clearClient;
+        clearClient.setInsecure();
+        if (clearClient.connect(FIREBASE_HOST, 443)) {
+          clearClient.printf("PUT %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", 
+                            clearUrl.c_str(), FIREBASE_HOST, clearData.length(), clearData.c_str());
+          delay(500);
+          clearClient.stop();
+        }
+      }
+      return;
+    }
+    
+    Serial.println("🔄 Restart requested from Firebase!");
+    
+    // Clear the restart flag BEFORE restarting to prevent restart loop
+    Serial.println("   Clearing restart flag in Firebase...");
+    String clearUrl = String("/hardware_control/restartRequested.json?auth=") + FIREBASE_AUTH;
+    String clearData = "false";
+    
+    if (currentConnection == CONN_WIFI) {
+      WiFiClientSecure clearClient;
+      clearClient.setInsecure();
+      if (clearClient.connect(FIREBASE_HOST, 443)) {
+        clearClient.printf("PUT %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", 
+                          clearUrl.c_str(), FIREBASE_HOST, clearData.length(), clearData.c_str());
+        delay(500); // Wait for request to complete
+        clearClient.stop();
+        Serial.println("   ✅ Restart flag cleared");
+      }
+    }
+    
+    lastRestartTime = millis(); // Record restart time
+    Serial.println("   Restarting ESP32 in 2 seconds...");
+    delay(2000);
+    ESP.restart();
+    return; // This won't execute, but good practice
+  }
+  
   // Read vibration intensity (affects motor PWM)
   String newVibrationIntensity = doc["vibrationIntensity"] | vibrationIntensity;
   if (newVibrationIntensity != vibrationIntensity) {
     Serial.println("🔔 Vibration intensity changed: " + vibrationIntensity + " → " + newVibrationIntensity);
     vibrationIntensity = newVibrationIntensity;
     // Adjust motor PWM based on intensity
-    if (vibrationIntensity == "low") {
-      currentVibrationPWM = 60;  // ~2.8V equivalent
-    } else if (vibrationIntensity == "high") {
-      currentVibrationPWM = 120; // ~5.6V equivalent (max safe for 3-5V motor)
+    // COIN MOTOR: Needs higher PWM values (150-255) for proper operation
+    if (USE_COIN_MOTOR_MODE) {
+      // Coin motor mode: Higher PWM values
+      if (vibrationIntensity == "low") {
+        currentVibrationPWM = 150;  // Low intensity for coin motor
+      } else if (vibrationIntensity == "high") {
+        currentVibrationPWM = 255;   // Maximum for coin motor
+      } else {
+        currentVibrationPWM = 200;   // Medium: default 200 for coin motor
+      }
     } else {
-      currentVibrationPWM = VIBRATION_MOTOR_PWM; // Medium: default 90
+      // Regular DC motor mode: Lower PWM values
+      if (vibrationIntensity == "low") {
+        currentVibrationPWM = 60;  // ~2.8V equivalent
+      } else if (vibrationIntensity == "high") {
+        currentVibrationPWM = 120; // ~5.6V equivalent (max safe for 3-5V motor)
+      } else {
+        currentVibrationPWM = VIBRATION_MOTOR_PWM; // Medium: default
+      }
     }
     Serial.print("   Motor PWM updated: ");
-    Serial.println(currentVibrationPWM);
+    Serial.print(currentVibrationPWM);
+    Serial.print(" (Coin motor mode: ");
+    Serial.print(USE_COIN_MOTOR_MODE ? "YES" : "NO");
+    Serial.println(")");
   }
   
   // Read volume preference (affects DFPlayer volume)
@@ -997,10 +1146,17 @@ void pollHardwareControl() {
   Serial.println("   motorEnabled = " + String(newMotorEnabled ? "true" : "false"));
   Serial.println("   ultrasonicEnabled = " + String(newUltrasonicEnabled ? "true" : "false"));
   Serial.println("   audioEnabled = " + String(newAudioEnabled ? "true" : "false"));
-  Serial.println("   language = " + userLanguage);
+  Serial.println("   language = " + userLanguage + " (normalized)");
   Serial.println("   usageLocation = " + usageLocation);
   Serial.println("   vibrationIntensity = " + vibrationIntensity);
   Serial.println("   volume = " + volume);
+  Serial.print("   Sensing range: ");
+  Serial.print(sensingDistanceMin);
+  Serial.print("-");
+  Serial.print(sensingDistanceMax);
+  Serial.println("cm");
+  Serial.print("   Motor PWM: ");
+  Serial.println(currentVibrationPWM);
 
     bool valuesChanged = (motorEnabled != newMotorEnabled || 
                          ultrasonicEnabled != newUltrasonicEnabled || 
@@ -1063,14 +1219,37 @@ void setup() {
   
   motorStop();
 
-  // OLED init
-  Wire.begin(21, 22);
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.println("System Booting...");
-  display.display();
+  // OLED init with error checking
+  Wire.begin(21, 22);  // SDA=21, SCL=22 for ESP32
+  Serial.println("🔍 Initializing OLED display...");
+  
+  // Try both common I2C addresses (0x3C and 0x3D)
+  bool oledFound = false;
+  if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    oledFound = true;
+    Serial.println("✅ OLED found at address 0x3C");
+  } else if (display.begin(SSD1306_SWITCHCAPVCC, 0x3D)) {
+    oledFound = true;
+    Serial.println("✅ OLED found at address 0x3D");
+  } else {
+    Serial.println("❌ OLED initialization FAILED!");
+    Serial.println("   Check wiring: SDA=GPIO21, SCL=GPIO22");
+    Serial.println("   Check I2C address (try 0x3C or 0x3D)");
+    Serial.println("   OLED will not display, but system will continue...");
+  }
+  
+  if (oledFound) {
+    oledReady = true;
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("System Booting...");
+    display.display();
+    Serial.println("✅ OLED display initialized successfully");
+  } else {
+    oledReady = false;
+  }
 
   // DFPlayer init (initialize only, don't play yet - will play after language is read)
   dfSerial.begin(9600, SERIAL_8N1, 13, 14); //DF_RX, DF_TX
@@ -1095,8 +1274,12 @@ void setup() {
   #endif
 
   startupTime = millis();
+  lastRestartTime = millis(); // Initialize restart time tracker to prevent restart loops
   systemReady = false;
   Serial.println("🕐 Waiting 7 seconds before enabling sensors...");
+  
+  // Optional: Uncomment the line below to test motor on startup
+  // testMotor();
 
   // ===================== WiFi Connection =====================
   Serial.println();
@@ -1104,10 +1287,12 @@ void setup() {
   Serial.println("📶 STARTING WIFI CONNECTION");
   Serial.println("========================================");
   
-  display.clearDisplay();
-  display.setCursor(0, 0);
-  display.println("Connecting WiFi...");
-  display.display();
+  if (oledReady) {
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println("Connecting WiFi...");
+    display.display();
+  }
   
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("📶 Connecting to WiFi: ");
@@ -1140,13 +1325,15 @@ void setup() {
     Serial.println(" dBm");
     Serial.println("========================================");
     
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.println("WiFi Connected!");
-    display.setCursor(0, 15);
-    display.print("IP: ");
-    display.println(WiFi.localIP().toString());
-    display.display();
+    if (oledReady) {
+      display.clearDisplay();
+      display.setCursor(0, 0);
+      display.println("WiFi Connected!");
+      display.setCursor(0, 15);
+      display.print("IP: ");
+      display.println(WiFi.localIP().toString());
+      display.display();
+    }
     delay(2000);
   } else {
     Serial.println("========================================");
@@ -1177,13 +1364,15 @@ void setup() {
     Serial.println("   4. ESP32 WiFi hardware issue");
     Serial.println("========================================");
     
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.println("WiFi Failed!");
-    display.setCursor(0, 15);
-    display.print("Status: ");
-    display.print(status);
-    display.display();
+    if (oledReady) {
+      display.clearDisplay();
+      display.setCursor(0, 0);
+      display.println("WiFi Failed!");
+      display.setCursor(0, 15);
+      display.print("Status: ");
+      display.print(status);
+      display.display();
+    }
   }
 
   // ===================== Firebase Connection =====================
@@ -1193,10 +1382,12 @@ void setup() {
     Serial.println("🔧 STARTING FIREBASE CONNECTION");
     Serial.println("========================================");
     
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.println("Connecting Firebase...");
-    display.display();
+    if (oledReady) {
+      display.clearDisplay();
+      display.setCursor(0, 0);
+      display.println("Connecting Firebase...");
+      display.display();
+    }
     
     // Firebase configuration for newer library version
     FirebaseConfig config;
@@ -1286,6 +1477,10 @@ void setup() {
      // Now play startup audio with correct language
      if (dfPlayerReady) {
        int startupFile = getAudioFileNumber(1); // Get correct file based on language (001 or 004)
+       Serial.print("🔍 Startup audio selection: baseFile=1, userLanguage=");
+       Serial.print(userLanguage);
+       Serial.print(", selected file=");
+       Serial.println(startupFile);
        if (startupFile > 0) {  // Only play if language is not "none"
          player.playFolder(1, startupFile);
          startupAudioPlayed = true;
@@ -1293,7 +1488,7 @@ void setup() {
          Serial.print("✅ DFPlayer: Playing startup audio ");
          Serial.print(startupFile < 10 ? "00" : "0");
          Serial.print(startupFile);
-         Serial.print(".mp3 (");
+         Serial.print(".mp3 (language=");
          Serial.print(userLanguage);
          Serial.println(")");
        } else {
@@ -1305,10 +1500,12 @@ void setup() {
        Serial.println("⚠️ DFPlayer not ready, skipping startup audio");
      }
     
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.println("Firebase OK!");
-    display.display();
+    if (oledReady) {
+      display.clearDisplay();
+      display.setCursor(0, 0);
+      display.println("Firebase OK!");
+      display.display();
+    }
     delay(1000);
   } else {
     // WiFi/Firebase connection failed - play default Tagalog startup audio
@@ -1396,18 +1593,20 @@ void loop() {
       Serial.println(firebaseReady ? "YES" : "NO");
       Serial.println("========================================");
     } else {
-      display.clearDisplay();
-      display.setCursor(0, 0);
-      display.println("Booting...");
-      display.setCursor(0, 15);
-      display.println("Searching GPS...");
-      if (WiFi.status() == WL_CONNECTED) {
-        display.setCursor(0, 30);
-        display.println("WiFi: OK");
-        display.setCursor(0, 45);
-        display.println("Firebase: OK");
+      if (oledReady) {
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        display.println("Booting...");
+        display.setCursor(0, 15);
+        display.println("Searching GPS...");
+        if (WiFi.status() == WL_CONNECTED) {
+          display.setCursor(0, 30);
+          display.println("WiFi: OK");
+          display.setCursor(0, 45);
+          display.println("Firebase: OK");
+        }
+        display.display();
       }
-      display.display();
       return;
     }
   }
@@ -1458,7 +1657,9 @@ void loop() {
   #endif
   
   if (systemReady && hasConnection && firebaseReady && gps.location.isValid()) {
-    if (millis() - lastGPSUpdate > 5000) {  // Update every 5 seconds
+    // GPS Update Interval: Uses GPS_UPDATE_INTERVAL constant (default: 1 second)
+    // Most GPS modules update at 1Hz (once per second), so 1 second is optimal for real-time
+    if (millis() - lastGPSUpdate > GPS_UPDATE_INTERVAL) {
       Serial.println("✅ All conditions met! Uploading GPS to Firebase...");
       updateGPSInFirebase();
       lastGPSUpdate = millis();
@@ -1539,6 +1740,10 @@ void loop() {
              // Audio will continuously loop as long as object is detected in this range
              if (currentAudioState != 1) {
                int audioFile = getAudioFileNumber(3);  // Get correct file (003 or 006)
+               Serial.print("🔍 Audio file selection: baseFile=3, userLanguage=");
+               Serial.print(userLanguage);
+               Serial.print(", selected file=");
+               Serial.println(audioFile);
                if (audioFile > 0) {  // Only play if language is not "none"
                  player.stop();  // Stop any currently playing audio first
                  delay(100);     // Small delay to ensure stop command is processed
@@ -1551,11 +1756,12 @@ void loop() {
                  Serial.print(sensingDistanceMin);
                  Serial.print("-");
                  Serial.print(sensingDistanceMax);
-                 Serial.print("cm, ");
+                 Serial.print("cm, language=");
                  Serial.print(userLanguage);
                  Serial.println(") - will loop continuously while object detected");
                } else {
                  // Language is "none" - don't play audio
+                 Serial.println("🔇 Audio not playing (language = 'none')");
                  currentAudioState = 0;
                }
              }
@@ -1585,6 +1791,11 @@ void loop() {
            // Motor disabled in Firebase - always stop
            motorStop();
            motorPulseState = false;
+           static unsigned long lastMotorDisabledLog = 0;
+           if (millis() - lastMotorDisabledLog > 5000) {  // Log every 5 seconds
+             Serial.println("🔔 Motor: DISABLED in Firebase (motorEnabled = false)");
+             lastMotorDisabledLog = millis();
+           }
          } else if (distance < sensingDistanceMin) {
            // Object too close - STOP motor (ignore close readings)
            motorStop();
@@ -1620,7 +1831,14 @@ void loop() {
              digitalWrite(IN1, HIGH);
              digitalWrite(IN2, LOW);
              if (motorPulseState) {
-               analogWrite(ENA, currentVibrationPWM);  // Use dynamic PWM
+               // For coin motor: Use higher PWM or full ON
+               #if USE_COIN_MOTOR_MODE
+               // Coin motor: Use full PWM value (already set high)
+               analogWrite(ENA, currentVibrationPWM);
+               #else
+               // Regular motor: Use dynamic PWM
+               analogWrite(ENA, currentVibrationPWM);
+               #endif
              } else {
                analogWrite(ENA, 0);
              }
@@ -1636,6 +1854,12 @@ void loop() {
              Serial.print(sensingDistanceMax);
              Serial.print("cm range, PWM: ");
              Serial.print(currentVibrationPWM);
+             Serial.print("/255, motorEnabled: ");
+             Serial.print(motorEnabled ? "true" : "false");
+             Serial.print(", ultrasonicEnabled: ");
+             Serial.print(ultrasonicEnabled ? "true" : "false");
+             Serial.print(", Coin motor: ");
+             Serial.print(USE_COIN_MOTOR_MODE ? "YES" : "NO");
              Serial.println(")");
              lastVibrateLog = millis();
            }
@@ -1690,11 +1914,12 @@ void loop() {
   }
 
   // ===================== OLED Display =====================
-  display.clearDisplay();
-  
-  // Show ultrasonic distance with LARGER text size (size 2) when enabled
-  // ALWAYS show distance, even if invalid (< 2cm)
-  if (ultrasonicEnabled) {
+  if (oledReady) {
+    display.clearDisplay();
+    
+    // Show ultrasonic distance with LARGER text size (size 2) when enabled
+    // ALWAYS show distance, even if invalid (< 2cm)
+    if (ultrasonicEnabled) {
     if (distance > 0 && distance < 400) {  // Show any reading (including < 2cm)
       display.setTextSize(2);  // Larger text for distance
       display.setCursor(0, 0);
@@ -1710,42 +1935,43 @@ void loop() {
       display.print(" CM");
     }
   }
-  // If ultrasonic disabled, show nothing (leave blank)
-  
-  // Reset text size to 1 for other displays
-  display.setTextSize(1);
-  
-  // Connection status (WiFi/GPRS) and Firebase status
-  bool wifiConnected = WiFi.status() == WL_CONNECTED;
-  #if ENABLE_SIM800L
-  bool gprsConnected = (currentConnection == CONN_GPRS && gprsReady);
-  #endif
+    // If ultrasonic disabled, show nothing (leave blank)
+    
+    // Reset text size to 1 for other displays
+    display.setTextSize(1);
+    
+    // Connection status (WiFi/GPRS) and Firebase status
+    bool wifiConnected = WiFi.status() == WL_CONNECTED;
+    #if ENABLE_SIM800L
+    bool gprsConnected = (currentConnection == CONN_GPRS && gprsReady);
+    #endif
 
-  display.setCursor(0, 15);
-  display.print("WiFi:");
-  display.print(wifiConnected ? "OK" : "NO");
+    display.setCursor(0, 15);
+    display.print("WiFi:");
+    display.print(wifiConnected ? "OK" : "NO");
 
-  display.setCursor(64, 15);
-  display.print("FB:");
-  display.print(firebaseReady ? "OK" : "NO");
+    display.setCursor(64, 15);
+    display.print("FB:");
+    display.print(firebaseReady ? "OK" : "NO");
 
-  #if ENABLE_SIM800L
-  display.setCursor(0, 27);
-  display.print("GPRS:");
-  display.print(gprsConnected ? "OK" : "NO");
-  #endif
-  
-  // GPS Satellites and Fix status
-  display.setCursor(0, 40);
-  display.print("Sats: ");
-  display.print(gps.satellites.value());
-  if (gps.location.isValid()) {
-    display.print(" FIX");
-  } else {
-    display.print(" ---");
+    #if ENABLE_SIM800L
+    display.setCursor(0, 27);
+    display.print("GPRS:");
+    display.print(gprsConnected ? "OK" : "NO");
+    #endif
+    
+    // GPS Satellites and Fix status
+    display.setCursor(0, 40);
+    display.print("Sats: ");
+    display.print(gps.satellites.value());
+    if (gps.location.isValid()) {
+      display.print(" FIX");
+    } else {
+      display.print(" ---");
+    }
+    
+    display.display();
   }
-  
-  display.display();
   delay(200);
 }
 

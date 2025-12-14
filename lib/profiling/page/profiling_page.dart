@@ -91,15 +91,14 @@ class _ProfilingPageState extends State<ProfilingPage> {
       return;
     }
 
-    // If hand sensitivity is Yes, end here
-    if (_handSensitivity == true) {
-      await _saveToFirebase();
-      return;
-    }
-
-    if (_vibrationIntensity == null) {
-      _showError("Please select vibration intensity preference");
-      return;
+    // If hand sensitivity is Yes, skip vibration intensity validation
+    // But still need voice alert, language, and volume
+    if (_handSensitivity == false) {
+      // Only check vibration intensity if hand sensitivity is No
+      if (_vibrationIntensity == null) {
+        _showError("Please select vibration intensity preference");
+        return;
+      }
     }
 
     if (_voiceAlertEnabled == null) {
@@ -138,9 +137,9 @@ class _ProfilingPageState extends State<ProfilingPage> {
         category: _category!,
         usageLocation: _usageLocation!,
         handSensitivity: _handSensitivity ?? false,
-        vibrationIntensity: _vibrationIntensity ?? 'medium',
+        vibrationIntensity: _handSensitivity == true ? 'none' : (_vibrationIntensity ?? 'medium'),
         voiceAlertEnabled: _voiceAlertEnabled ?? false,
-        language: _language ?? 'none',
+        language: _language ?? 'tagalog',
         volume: _volume ?? 'medium',
       );
 
@@ -149,9 +148,9 @@ class _ProfilingPageState extends State<ProfilingPage> {
         motorEnabled: _handSensitivity == false, // Enable motor only if no hand sensitivity
         ultrasonicEnabled: true, // Always enabled
         audioEnabled: _voiceAlertEnabled == true, // Enable only if voice alert is Yes
-        language: _language ?? 'none',
+        language: _language ?? 'tagalog',
         usageLocation: _usageLocation!,
-        vibrationIntensity: _vibrationIntensity ?? 'medium',
+        vibrationIntensity: _handSensitivity == true ? 'none' : (_vibrationIntensity ?? 'medium'),
         volume: _volume ?? 'medium',
       );
 
@@ -260,222 +259,793 @@ class _ProfilingPageState extends State<ProfilingPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text(
-          'Select Your Category',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          'Select Category',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Elderly Category Card
+        InkWell(
+          onTap: () {
+            setState(() => _category = 'elderly');
+            _nextStep();
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _category == 'elderly' ? Colors.blue : Colors.grey,
+                width: 2,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
+                  child: Image.asset(
+                    'assets/images/eldery.jpg',
+                    width: double.infinity,
+                    height: 150,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        height: 150,
+                        color: Colors.grey[300],
+                        child: const Icon(Icons.image, size: 50),
+                      );
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    'Elderly',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
         const SizedBox(height: 24),
-        _buildRadioOption(
-          'Elderly',
-          'elderly',
-          _category,
-          (value) => setState(() => _category = value),
+        // Blind Category Card
+        InkWell(
+          onTap: () {
+            setState(() => _category = 'blind');
+            _nextStep();
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _category == 'blind' ? Colors.blue : Colors.grey,
+                width: 2,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
+                  child: Image.asset(
+                    'assets/images/blind.jpg',
+                    width: double.infinity,
+                    height: 150,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        height: 150,
+                        color: Colors.grey[300],
+                        child: const Icon(Icons.image, size: 50),
+                      );
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    'Blind',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
-        const SizedBox(height: 12),
-        _buildRadioOption(
-          'Blind',
-          'blind',
-          _category,
-          (value) => setState(() => _category = value),
-        ),
-        const SizedBox(height: 12),
-        _buildRadioOption(
-          'High-Risk',
-          'high-risk',
-          _category,
-          (value) => setState(() => _category = value),
+        const SizedBox(height: 24),
+        // High-Risk Category Card
+        InkWell(
+          onTap: () {
+            setState(() => _category = 'high-risk');
+            _nextStep();
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _category == 'high-risk' ? Colors.blue : Colors.grey,
+                width: 2,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
+                  child: Image.asset(
+                    'assets/images/highkers.png',
+                    width: double.infinity,
+                    height: 150,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        height: 150,
+                        color: Colors.grey[300],
+                        child: const Icon(Icons.image, size: 50),
+                      );
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    'High-risk',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ],
     );
   }
 
   Widget _buildUsageLocation() {
+    // Category-specific question wording
+    String questionText;
+    if (_category == 'blind') {
+      questionText = 'Where does the user often use the cane?';
+    } else if (_category == 'elderly') {
+      questionText = 'Where do you often use the cane?';
+    } else {
+      // high-risk
+      questionText = 'Where do you often use the cane?';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Where do you often use the cane?',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        Text(
+          questionText,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Indoors Button
+        InkWell(
+          onTap: () {
+            setState(() => _usageLocation = 'indoors');
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _usageLocation == 'indoors'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _usageLocation == 'indoors'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Indoors',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
         const SizedBox(height: 24),
-        _buildRadioOption(
-          'Indoors',
-          'indoors',
-          _usageLocation,
-          (value) => setState(() => _usageLocation = value),
-        ),
-        const SizedBox(height: 12),
-        _buildRadioOption(
-          'Outdoors',
-          'outdoors',
-          _usageLocation,
-          (value) => setState(() => _usageLocation = value),
+        // Outdoors Button
+        InkWell(
+          onTap: () {
+            setState(() => _usageLocation = 'outdoors');
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _usageLocation == 'outdoors'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _usageLocation == 'outdoors'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Outdoors',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
   }
 
   Widget _buildHandSensitivity() {
+    // Category-specific question wording
+    String questionText;
+    if (_category == 'blind') {
+      questionText = 'Does the user have any sensitivity in their hands that would make vibration uncomfortable?';
+    } else if (_category == 'elderly') {
+      questionText = 'Do you have any sensitivity in your hands that would make vibration uncomfortable?';
+    } else {
+      // high-risk
+      questionText = 'Do you have any sensitivity in your hands that would make vibration uncomfortable?';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Do you have any sensitivity in your hands that would make vibration uncomfortable?',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        Text(
+          questionText,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Yes Button
+        InkWell(
+          onTap: () {
+            setState(() => _handSensitivity = true);
+            // If Yes is selected, skip vibration intensity and go to voice alert
+            // Vibration is not applicable, but voice alert can still be used
+            Future.delayed(const Duration(milliseconds: 300), () {
+              setState(() {
+                _currentStep = 4; // Go directly to Voice Alert Preference (skip Vibration Intensity)
+              });
+            });
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF6C5CE7), Color(0xFF5A4FCF)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Center(
+              child: Text(
+                'Yes',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
         const SizedBox(height: 24),
-        _buildRadioOption(
-          'Yes',
-          'yes',
-          _handSensitivity == true ? 'yes' : (_handSensitivity == false ? 'no' : null),
-          (value) {
-            setState(() => _handSensitivity = value == 'yes');
-            // If Yes is selected, automatically save and end questionnaire
-            if (value == 'yes') {
-              Future.delayed(const Duration(milliseconds: 300), () {
-                _saveProfilingData();
-              });
-            }
+        // No Button
+        InkWell(
+          onTap: () {
+            setState(() => _handSensitivity = false);
+            _nextStep();
           },
-        ),
-        const SizedBox(height: 12),
-        _buildRadioOption(
-          'No',
-          'no',
-          _handSensitivity == true ? 'yes' : (_handSensitivity == false ? 'no' : null),
-          (value) => setState(() => _handSensitivity = value == 'yes'),
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF6C5CE7), Color(0xFF5A4FCF)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Center(
+              child: Text(
+                'No',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
   }
 
   Widget _buildVibrationIntensity() {
+    // Category-specific question wording
+    String questionText;
+    if (_category == 'blind') {
+      questionText = 'What is the user\'s preferred vibration intensity?';
+    } else if (_category == 'elderly') {
+      questionText = 'Vibration Intensity Preference';
+    } else {
+      // high-risk
+      questionText = 'Vibration Intensity Preference';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Vibration Intensity Preference',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        Text(
+          questionText,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Low Button
+        InkWell(
+          onTap: () {
+            setState(() => _vibrationIntensity = 'low');
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _vibrationIntensity == 'low'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _vibrationIntensity == 'low'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Low',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
         const SizedBox(height: 24),
-        _buildRadioOption(
-          'Low',
-          'low',
-          _vibrationIntensity,
-          (value) => setState(() => _vibrationIntensity = value),
+        // Medium Button
+        InkWell(
+          onTap: () {
+            setState(() => _vibrationIntensity = 'medium');
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _vibrationIntensity == 'medium'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _vibrationIntensity == 'medium'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Medium',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
-        const SizedBox(height: 12),
-        _buildRadioOption(
-          'Medium',
-          'medium',
-          _vibrationIntensity,
-          (value) => setState(() => _vibrationIntensity = value),
-        ),
-        const SizedBox(height: 12),
-        _buildRadioOption(
-          'High',
-          'high',
-          _vibrationIntensity,
-          (value) => setState(() => _vibrationIntensity = value),
+        const SizedBox(height: 24),
+        // High Button
+        InkWell(
+          onTap: () {
+            setState(() => _vibrationIntensity = 'high');
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _vibrationIntensity == 'high'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _vibrationIntensity == 'high'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'High',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
   }
 
   Widget _buildVoiceAlertPreference() {
+    // Category-specific question wording
+    String questionText;
+    if (_category == 'blind') {
+      questionText = 'Does the user prefer voice alert?';
+    } else if (_category == 'elderly') {
+      questionText = 'Do you prefer voice alert?';
+    } else {
+      // high-risk
+      questionText = 'Do you prefer voice alert?';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Do you prefer a voice alert?',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        Text(
+          questionText,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Yes Button
+        InkWell(
+          onTap: () {
+            setState(() => _voiceAlertEnabled = true);
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF6C5CE7), Color(0xFF5A4FCF)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Center(
+              child: Text(
+                'Yes',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
         const SizedBox(height: 24),
-        _buildRadioOption(
-          'Yes',
-          'yes',
-          _voiceAlertEnabled == true ? 'yes' : (_voiceAlertEnabled == false ? 'no' : null),
-          (value) => setState(() => _voiceAlertEnabled = value == 'yes'),
-        ),
-        const SizedBox(height: 12),
-        _buildRadioOption(
-          'No',
-          'no',
-          _voiceAlertEnabled == true ? 'yes' : (_voiceAlertEnabled == false ? 'no' : null),
-          (value) {
-            setState(() => _voiceAlertEnabled = value == 'yes');
+        // No Button
+        InkWell(
+          onTap: () {
+            setState(() => _voiceAlertEnabled = false);
             // If No is selected, automatically save and end questionnaire
-            if (value == 'no') {
-              Future.delayed(const Duration(milliseconds: 300), () {
-                _saveProfilingData();
-              });
-            }
+            Future.delayed(const Duration(milliseconds: 300), () {
+              _saveProfilingData();
+            });
+            Future.delayed(const Duration(milliseconds: 300), () {
+              _saveProfilingData();
+            });
           },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF6C5CE7), Color(0xFF5A4FCF)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Center(
+              child: Text(
+                'No',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
   }
 
   Widget _buildLanguageSelection() {
+    // Category-specific question wording
+    String questionText;
+    if (_category == 'blind') {
+      questionText = 'What is the user\'s preferred language for voice alert?';
+    } else if (_category == 'elderly') {
+      questionText = 'Preferred Language for Voice Alert';
+    } else {
+      // high-risk
+      questionText = 'Preferred Language for Voice Alert';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Preferred Language for Voice Alert',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        Text(
+          questionText,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // English Button
+        InkWell(
+          onTap: () {
+            setState(() => _language = 'english');
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _language == 'english'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _language == 'english'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'English',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
         const SizedBox(height: 24),
-        _buildRadioOption(
-          'English',
-          'english',
-          _language,
-          (value) => setState(() => _language = value),
-        ),
-        const SizedBox(height: 12),
-        _buildRadioOption(
-          'Filipino',
-          'filipino',
-          _language,
-          (value) => setState(() => _language = value),
-        ),
-        const SizedBox(height: 12),
-        _buildRadioOption(
-          'None',
-          'none',
-          _language,
-          (value) => setState(() => _language = value),
+        // Filipino Button
+        InkWell(
+          onTap: () {
+            setState(() => _language = 'filipino');
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _language == 'filipino'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _language == 'filipino'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Filipino',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
   }
 
   Widget _buildVolumeSelection() {
+    // Category-specific question wording
+    String questionText;
+    if (_category == 'blind') {
+      questionText = 'What is the user\'s preferred voice alert volume?';
+    } else if (_category == 'elderly') {
+      questionText = 'Voice Alert Volume Preference';
+    } else {
+      // high-risk
+      questionText = 'Voice Alert Volume Preference';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Voice Alert Volume Preference',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        Text(
+          questionText,
+          style: const TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Low Button
+        InkWell(
+          onTap: () {
+            setState(() => _volume = 'low');
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _volume == 'low'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _volume == 'low'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Low',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
         const SizedBox(height: 24),
-        _buildRadioOption(
-          'Low',
-          'low',
-          _volume,
-          (value) => setState(() => _volume = value),
+        // Medium Button
+        InkWell(
+          onTap: () {
+            setState(() => _volume = 'medium');
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _volume == 'medium'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _volume == 'medium'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Medium',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
-        const SizedBox(height: 12),
-        _buildRadioOption(
-          'Medium',
-          'medium',
-          _volume,
-          (value) => setState(() => _volume = value),
-        ),
-        const SizedBox(height: 12),
-        _buildRadioOption(
-          'High',
-          'high',
-          _volume,
-          (value) => setState(() => _volume = value),
+        const SizedBox(height: 24),
+        // High Button
+        InkWell(
+          onTap: () {
+            setState(() => _volume = 'high');
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _volume == 'high'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _volume == 'high'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'High',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
@@ -546,28 +1116,134 @@ class _ProfilingPageState extends State<ProfilingPage> {
 
     if (_questionnaireCompleted) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Profiling')),
-        body: Center(
+        backgroundColor: const Color(0xFF1A1A1A), // Dark gray background
+        body: SafeArea(
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.check_circle, color: Colors.green, size: 80),
-              const SizedBox(height: 24),
-              const Text(
-                'Questionnaire Completed!',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              // Header Section
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                color: Colors.grey[300],
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Profiling',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                    // GABAY TECH Logo
+                    Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.blue, width: 2),
+                            color: Colors.white,
+                          ),
+                          child: const Icon(
+                            Icons.accessible_forward,
+                            color: Colors.blue,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'GABAY',
+                          style: TextStyle(
+                            color: Colors.blue,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Text(
+                            'TECH',
+                            style: TextStyle(
+                              color: Colors.blue,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 16),
-              const Text('Your preferences have been saved.'),
-              const SizedBox(height: 32),
-              ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    _questionnaireCompleted = false;
-                    _currentStep = 0;
-                  });
-                },
-                child: const Text('Edit Preferences'),
+              // Main Content
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'Questionnaire Completed!',
+                        style: TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 40),
+                      // Large green circle with checkmark
+                      Container(
+                        width: 120,
+                        height: 120,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.green,
+                          border: Border.all(
+                            color: Colors.green,
+                            width: 4,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.check,
+                          color: Colors.white,
+                          size: 60,
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      const Text(
+                        'your preferences have been saved',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 60),
+                      // Edit Preferences link
+                      InkWell(
+                        onTap: () {
+                          setState(() {
+                            _questionnaireCompleted = false;
+                            _currentStep = 0;
+                          });
+                        },
+                        child: const Text(
+                          'Edit Preferences',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.blue,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -575,9 +1251,407 @@ class _ProfilingPageState extends State<ProfilingPage> {
       );
     }
 
+    // Custom header for category selection (step 0)
+    if (_currentStep == 0) {
+    return Scaffold(
+        backgroundColor: const Color(0xFF1A1A1A), // Dark gray background
+        body: SafeArea(
+          child: Column(
+            children: [
+              // Header Section
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                color: Colors.grey[300],
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back, color: Colors.black),
+                          onPressed: () {
+                            if (_currentStep == 0) {
+                              // If on first step, go back to homepage
+                              Navigator.pop(context);
+                            } else {
+                              // Otherwise, go to previous step
+                              _previousStep();
+                            }
+                          },
+                        ),
+              const Text(
+                          'Profiling',
+                style: TextStyle(
+                            fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        // GABAY TECH Logo
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.blue, width: 2),
+                            color: Colors.white,
+                          ),
+                          child: const Icon(
+                            Icons.accessible_forward,
+                            color: Colors.blue,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'GABAY',
+                          style: TextStyle(
+                            color: Colors.blue,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Text(
+                            'TECH',
+                            style: TextStyle(
+                              color: Colors.blue,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        // Hamburger menu
+                        IconButton(
+                          icon: const Icon(Icons.menu, color: Colors.white),
+                          onPressed: () {
+                            // Menu functionality if needed
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              // Main Content
+              Expanded(
+                child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+                        // Name field
+              TextFormField(
+                controller: _nameController,
+                          style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: _category == 'blind' ? 'User\'s Name' : 'Name',
+                            labelStyle: const TextStyle(color: Colors.white70),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.white70),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.white70),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.blue),
+                            ),
+                            prefixIcon: const Icon(Icons.person, color: Colors.white70),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    if (_category == 'blind') {
+                      return 'Please enter the user\'s name';
+                    } else {
+                      return 'Please enter your name';
+                    }
+                  }
+                  return null;
+                },
+              ),
+                        const SizedBox(height: 40),
+                        // Category selection
+                        _buildCurrentStep(),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Helper method to build custom header
+    Widget _buildCustomHeader() {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        color: Colors.grey[300],
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.black),
+                  onPressed: () {
+                    if (_currentStep == 0) {
+                      Navigator.pop(context);
+                    } else {
+                      _previousStep();
+                    }
+                  },
+                ),
+              const Text(
+                  'Profiling',
+                style: TextStyle(
+                    fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                  ),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.blue, width: 2),
+                    color: Colors.white,
+                  ),
+                  child: const Icon(
+                    Icons.accessible_forward,
+                    color: Colors.blue,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 6),
+              const Text(
+                  'GABAY',
+                style: TextStyle(
+                    color: Colors.blue,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Text(
+                    'TECH',
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.menu, color: Colors.white),
+                  onPressed: () {},
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Custom Scaffold for step 1 (Usage Location)
+    if (_currentStep == 1) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF1A1A1A),
+        body: SafeArea(
+          child: Column(
+            children: [
+              _buildCustomHeader(),
+              Expanded(
+                child: Form(
+                  key: _formKey,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildCurrentStep(),
+                        const SizedBox(height: 40),
+                        // Previous Button
+                        OutlinedButton(
+                          onPressed: _previousStep,
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            side: const BorderSide(color: Color(0xFF6C5CE7), width: 2),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'Previous',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF6C5CE7),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Custom Scaffold for steps 2-6
+    if (_currentStep >= 2 && _currentStep <= 6) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF1A1A1A),
+        body: SafeArea(
+          child: Column(
+            children: [
+              _buildCustomHeader(),
+              Expanded(
+                child: Form(
+                  key: _formKey,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildCurrentStep(),
+                        const SizedBox(height: 40),
+                        // Navigation buttons - Previous and Submit (for step 6) or just Previous (for steps 2-5)
+                        if (_currentStep == 6) ...[
+                          // Step 6: Previous and Submit buttons side by side
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: _previousStep,
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(vertical: 16),
+                                    side: const BorderSide(color: Color(0xFF6C5CE7), width: 2),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Previous',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF6C5CE7),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: ElevatedButton(
+                onPressed: _isLoading ? null : _saveProfilingData,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                    backgroundColor: const Color(0xFF6C5CE7),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: _isLoading
+                    ? const SizedBox(
+                        width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                          ),
+                      )
+                    : const Text(
+                                          'Submit',
+                        style: TextStyle(
+                                            fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                          ),
+                        ),
+                      ),
+              ),
+            ],
+          ),
+                        ] else ...[
+                          // Steps 2-5: Just Previous button
+                          OutlinedButton(
+                            onPressed: _previousStep,
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              side: const BorderSide(color: Color(0xFF6C5CE7), width: 2),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text(
+                              'Previous',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF6C5CE7),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+        ),
+      ),
+    );
+  }
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Profiling - ${_getStepTitle()}'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            if (_currentStep == 0) {
+              // If on first step, go back to homepage
+              Navigator.pop(context);
+            } else {
+              // Otherwise, go to previous step
+              _previousStep();
+            }
+          },
+        ),
       ),
       body: Form(
         key: _formKey,
@@ -586,26 +1660,6 @@ class _ProfilingPageState extends State<ProfilingPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Name field (only on first step)
-              if (_currentStep == 0) ...[
-                TextFormField(
-                  controller: _nameController,
-                  decoration: InputDecoration(
-                    labelText: 'Name',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    prefixIcon: const Icon(Icons.person),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Please enter your name';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 24),
-              ],
               // Progress indicator
               LinearProgressIndicator(
                 value: (_currentStep + 1) / 7,
@@ -666,12 +1720,12 @@ class _ProfilingPageState extends State<ProfilingPage> {
                                 _nextStep();
                               }
                             },
-                            child: _isLoading
-                                ? const SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
+                child: _isLoading
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                                 : Text(_currentStep == 6 ? 'Save' : 'Next'),
                           ),
                         ),

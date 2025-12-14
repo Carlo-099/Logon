@@ -165,6 +165,9 @@ class FirebaseService {
         data['volume'] = volume;
       }
       
+      // Add restart flag to trigger ESP32 restart
+      data['restartRequested'] = true;
+      
       await _database.child('hardware_control').set(data);
     } catch (e) {
       throw Exception("Failed to save hardware control: $e");
@@ -179,6 +182,39 @@ class FirebaseService {
       }
       return null;
     });
+  }
+
+  // ===================== TEXT SIZE SETTINGS =====================
+
+  // Save text size preference (medium or large) - saved to profiling data
+  Future<void> saveTextSize(String textSize) async {
+    try {
+      final userId = getCurrentUserId();
+      if (userId == null) {
+        throw Exception("User not logged in");
+      }
+
+      // Save to profiling data (which has proper auth rules)
+      await _database.child('profiling').child(userId).child('textSize').set(textSize);
+    } catch (e) {
+      throw Exception("Failed to save text size: $e");
+    }
+  }
+
+  // Get text size preference
+  Future<String?> getTextSize() async {
+    try {
+      final userId = getCurrentUserId();
+      if (userId == null) return null;
+
+      final snapshot = await _database.child('profiling').child(userId).child('textSize').get();
+      if (snapshot.exists) {
+        return snapshot.value as String;
+      }
+      return 'medium'; // Default
+    } catch (e) {
+      return 'medium'; // Default on error
+    }
   }
 }
 
