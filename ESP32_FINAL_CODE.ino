@@ -30,6 +30,35 @@
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
+// ===================== Battery Monitoring Setup (TP4056 Module) =====================
+// Battery voltage monitoring pin
+// 
+// AVAILABLE ADC1 PINS FOR BATTERY MONITORING:
+// - GPIO36 (ADC1_CH0) - if available
+// - GPIO39 (ADC1_CH3) - RECOMMENDED ALTERNATIVE
+// - GPIO34 (ADC1_CH6) - alternative
+// - GPIO35 (ADC1_CH7) - alternative
+// 
+// WIRING INSTRUCTIONS FOR TP4056 MODULE:
+// 1. Connect TP4056 BAT+ (battery positive) to your battery positive
+// 2. Connect TP4056 BAT- (battery negative) to your battery negative and ESP32 GND
+// 3. Create voltage divider circuit:
+//    BAT+ → [R1: 10kΩ] → GPIO39 (or your chosen pin) → [R2: 10kΩ] → GND
+//    This divides voltage by 2, so max readable = 6.6V (ESP32 ADC max = 3.3V)
+// 4. TP4056 OUT+ → ESP32 VIN (5V) or 3.3V pin (if using regulator)
+// 5. TP4056 OUT- → ESP32 GND
+//
+// NOTE: If using powerbank with USB output:
+// - Connect USB output to TP4056 IN+ and IN- (for charging)
+// - Or use TP4056 to charge a separate battery that powers ESP32
+//
+#define BATTERY_ADC_PIN 35  // GPIO35 (ADC1_CHANNEL_7) - User's wiring
+#define BATTERY_R1 10000.0  // Voltage divider R1 (10kΩ)
+#define BATTERY_R2 10000.0  // Voltage divider R2 (10kΩ)
+#define BATTERY_VOLTAGE_DIVIDER (BATTERY_R1 + BATTERY_R2) / BATTERY_R2  // = 2.0
+#define BATTERY_FULL_VOLTAGE 4.2  // Full battery voltage (for Li-ion/LiPo - typical for TP4056)
+#define BATTERY_EMPTY_VOLTAGE 3.0  // Empty battery voltage (cutoff for Li-ion)
+
 // ===================== DFPlayer Pins =====================
 #define DF_RX 14
 #define DF_TX 13
@@ -66,17 +95,23 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define SIM800L_PWR 32 // Optional: Power pin for SIM800L (if you have it)
 
 // ===================== WiFi Configuration =====================
-// Current WiFi credentials (active)
-//#define WIFI_SSID "LUNA LAPUK"
-//#define WIFI_PASSWORD "Bog@rdyuki12"
+// WiFi Fallback System: Tries networks in order (Primary → Fallback)
+// Structure: {SSID, Password, Description}
+struct WiFiNetwork {
+  const char* ssid;
+  const char* password;
+  const char* description;
+};
 
-// Previous WiFi credentials (commented out for reference - PLDT)
-#define WIFI_SSID "PLDTHOMEFIBRsyhhi"
-#define WIFI_PASSWORD "PLDTWIFIkyzbp"
+// Define WiFi networks in priority order (tries first network, then second if first fails)
+const WiFiNetwork wifiNetworks[] = {
+  {"Ao/Hr", "@AoHR_employee@spcc2024", "Primary WiFi (Ao/Hr)"},           // Primary: Ao/Hr WiFi
+  {"iPhone", "elle2025", "Fallback Hotspot (iPhone - Phone Data)"}        // Fallback: iPhone hotspot (uses phone data)
+};
 
-// Hotspot ng smartphone (ACTIVE)
-//#define WIFI_SSID "iPhone"
-//#define WIFI_PASSWORD "elle2025"
+const int wifiNetworkCount = sizeof(wifiNetworks) / sizeof(wifiNetworks[0]);
+
+
 
 // ===================== Firebase Configuration =====================
 // Note: Use the database URL without https:// and without trailing slash
@@ -104,14 +139,21 @@ double lat = 0.0, lon = 0.0;
 long duration;
 float distance;
 float filteredDistance = 0.0;  // Filtered/averaged distance for stability
-int currentAudioState = 0;          // 0 = none, 1 = 002.mp3, 2 = 003.mp3
+int currentAudioState = 0;          // 0 = none, 1 = detection audio playing (varies by category)
 bool dfPlayerReady = false;         // Track if DFPlayer is initialized and ready
 bool oledReady = false;              // Track if OLED display is initialized and ready
 bool startupAudioPlayed = false;    // Track if startup audio (001/004) has been played
+bool startupAudioInitialized = false; // Guard to prevent duplicate audio playback
 unsigned long startupAudioTime = 0; // When startup audio started (for timing/gating)
 bool ultrasonicEnabledAfterDelay = false; // Prevent ultrasonic from running during startup audio
 unsigned long lastMotorPulse = 0;   // Timing for fast pulsing at 100cm
 bool motorPulseState = false;       // Current state for fast pulsing (on/off toggle)
+
+// Battery monitoring variables
+float batteryVoltage = 0.0;         // Current battery voltage
+int batteryPercentage = 0;          // Battery percentage (0-100)
+unsigned long lastBatteryCheck = 0; // Last time battery was checked
+const unsigned long BATTERY_CHECK_INTERVAL = 5000; // Check battery every 5 seconds
 
 unsigned long startupTime;
 bool systemReady = false;
@@ -128,6 +170,24 @@ String usageLocation = "outdoors"; // "indoors" or "outdoors" - affects sensing 
 String vibrationIntensity = "medium"; // "low", "medium", "high" - affects motor PWM
 String volume = "medium"; // "low", "medium", "high" - affects audio volume
 unsigned long lastLanguageCheck = 0;  // Track when we last checked language preference
+
+// Elderly category behaviors (from profiling)
+String userCategory = ""; // "elderly" or "high-risk"
+double elderlySensorRange = 50.0; // Sensor range from elderly profiling (50, 70, or 100 cm)
+String scanningMode = "event-based"; // "continuous", "semi-continuous", or "event-based"
+String vibrationMode = "soft_pulse"; // "strong_repeated", "normal_pulse", or "soft_pulse"
+int alertCooldown = 3; // Alert cooldown in seconds (1, 2, or 3)
+bool indoorMode = false; // Indoor mode flag
+int alertRepetition = 2; // Alert repetition (1 = LOW, 2 = Standard)
+int voiceDelay = 1000; // Voice delay in milliseconds (3000 = longer, 1000 = standard)
+unsigned long lastProfilingCheck = 0; // Track when we last checked profiling data
+
+// High-risk category behaviors (from profiling)
+String sensorAngle = "forward"; // "upward", "downward", or "forward"
+String detectionLevel = ""; // "head_chest" for upward angle
+bool voiceRepeat = false; // Voice repeat mode (for continuous assistance)
+bool depthDetection = false; // Depth detection mode (for terrain)
+bool terrainVoiceWarning = false; // H5: Terrain voice warning enabled (for terrain audio file selection)
 
 // Dynamic settings based on Firebase preferences
 // Initialize PWM based on coin motor mode
@@ -166,6 +226,69 @@ void motorStop() {
   analogWrite(ENA, 0);
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, LOW);
+}
+
+// ===================== Battery Monitoring Functions =====================
+void readBatteryVoltage() {
+  // Read ADC value (0-4095 for 12-bit ADC on ESP32)
+  int adcValue = analogRead(BATTERY_ADC_PIN);
+  
+  // Debug: Log raw ADC reading occasionally
+  static unsigned long lastADCDebug = 0;
+  if (millis() - lastADCDebug > 10000) {  // Log every 10 seconds
+    Serial.print("🔋 Raw ADC Reading (GPIO");
+    Serial.print(BATTERY_ADC_PIN);
+    Serial.print("): ");
+    Serial.print(adcValue);
+    Serial.print(" / 4095");
+    lastADCDebug = millis();
+  }
+  
+  // Convert ADC value to voltage (0-3.3V range)
+  float adcVoltage = (adcValue / 4095.0) * 3.3;
+  
+  // Apply voltage divider correction (if using voltage divider circuit)
+  batteryVoltage = adcVoltage * BATTERY_VOLTAGE_DIVIDER;
+  
+  // Calculate battery percentage based on voltage
+  // For Li-ion/LiPo: Full = 4.2V, Empty = 3.0V
+  if (batteryVoltage >= BATTERY_FULL_VOLTAGE) {
+    batteryPercentage = 100;
+  } else if (batteryVoltage <= BATTERY_EMPTY_VOLTAGE) {
+    batteryPercentage = 0;
+  } else {
+    // Linear interpolation between empty and full
+    float voltageRange = BATTERY_FULL_VOLTAGE - BATTERY_EMPTY_VOLTAGE;
+    float voltageAboveEmpty = batteryVoltage - BATTERY_EMPTY_VOLTAGE;
+    batteryPercentage = (int)((voltageAboveEmpty / voltageRange) * 100.0);
+    // Clamp to 0-100
+    if (batteryPercentage > 100) batteryPercentage = 100;
+    if (batteryPercentage < 0) batteryPercentage = 0;
+  }
+  
+  // Log battery status (every check)
+  Serial.print("🔋 Battery: ");
+  Serial.print(batteryVoltage, 2);
+  Serial.print("V (");
+  Serial.print(batteryPercentage);
+  Serial.print("%) | ADC: ");
+  Serial.print(adcValue);
+  Serial.print(" | ADC Voltage: ");
+  Serial.print(adcVoltage, 2);
+  Serial.println("V");
+  
+  // Warning if battery reading seems wrong
+  if (adcValue == 0 && batteryPercentage == 0) {
+    static unsigned long lastWarning = 0;
+    if (millis() - lastWarning > 30000) {  // Warn every 30 seconds
+      Serial.println("⚠️ WARNING: Battery ADC reading is 0! Check wiring:");
+      Serial.print("   - GPIO");
+      Serial.print(BATTERY_ADC_PIN);
+      Serial.println(" should be connected to voltage divider");
+      Serial.println("   - Verify voltage divider circuit: BAT+ → [R1: 10kΩ] → GPIO35 → [R2: 10kΩ] → GND");
+      lastWarning = millis();
+    }
+  }
 }
 
 // Motor test function - call this to test if motor is working
@@ -292,6 +415,55 @@ void motorControlByDistance(float dist) {
   }
 }
 
+// ===================== Battery Icon Drawing Function =====================
+// Draws a LARGE battery icon on OLED display based on battery percentage
+// Icon: Horizontal battery with rounded terminal on the right
+// Position: x, y coordinates on screen
+// Size: width and height of battery body
+void drawBatteryIcon(int x, int y, int width, int height, int percentage) {
+  // Clamp percentage to 0-100
+  if (percentage < 0) percentage = 0;
+  if (percentage > 100) percentage = 100;
+  
+  // Battery body (rectangle) - thicker border for large icon
+  display.drawRect(x, y, width, height, SSD1306_WHITE);
+  display.drawRect(x + 1, y + 1, width - 2, height - 2, SSD1306_WHITE); // Double border for visibility
+  
+  // Battery terminal (small rounded rectangle on the right)
+  int terminalWidth = 4;  // Increased for larger battery
+  int terminalHeight = height / 3;  // Proportional terminal
+  int terminalX = x + width;
+  int terminalY = y + (height - terminalHeight) / 2;
+  display.fillRect(terminalX, terminalY, terminalWidth, terminalHeight, SSD1306_WHITE);
+  
+  // Battery fill (based on percentage) - with padding for border
+  int borderPadding = 3;  // Thicker border for large icon
+  int fillWidth = (width - (borderPadding * 2)) * percentage / 100;
+  
+  // Always draw the battery outline, fill only if percentage > 0
+  if (fillWidth > 0) {
+    display.fillRect(x + borderPadding, y + borderPadding, fillWidth, height - (borderPadding * 2), SSD1306_WHITE);
+  }
+  
+  // Debug: Log battery icon drawing (occasionally)
+  static unsigned long lastIconDebug = 0;
+  if (millis() - lastIconDebug > 10000) {  // Log every 10 seconds
+    Serial.print("🔋 Drawing battery icon: ");
+    Serial.print(percentage);
+    Serial.print("% at (");
+    Serial.print(x);
+    Serial.print(",");
+    Serial.print(y);
+    Serial.print(") size ");
+    Serial.print(width);
+    Serial.print("x");
+    Serial.print(height);
+    Serial.print(", fillWidth=");
+    Serial.println(fillWidth);
+    lastIconDebug = millis();
+  }
+}
+
 // ===================== Audio Language Helper =====================
 // Maps audio file numbers based on language preference
 // Tagalog/Filipino: 001, 002, 003
@@ -310,6 +482,48 @@ int getAudioFileNumber(int baseFile) {
     // "filipino" is treated the same as "tagalog"
     return baseFile;
   }
+}
+
+// ===================== New Audio File Selection =====================
+// Returns the correct audio file number based on category and settings
+// NEW MAPPING:
+// Elderly E7="Oo": 009 (Tagalog) or 0014 (English) - "may harang" / "There is an Obstacle"
+// Elderly E7="Hindi": 0010 (Tagalog) or 0015 (English) - "babala malapit na ang harang" / "Warning: obstacle approaching"
+// High-risk H1="Oo": 002 (Tagalog) or 005 (English) - Head-level warning (no change)
+// High-risk H5="Oo" + H1="Hindi": 0012 (Tagalog) or 0017 (English) - "babala, may lalim sa unahan" / "Warning: there's a drop ahead"
+int getDetectionAudioFile() {
+  if (userLanguage == "none") {
+    return 0;  // No audio
+  }
+  
+  // Elderly category
+  if (userCategory == "elderly") {
+    if (alertRepetition == 1) {
+      // E7 = "Oo" (Gets tired easily) - LOW repetition
+      return (userLanguage == "english") ? 14 : 9;  // 0014.mp3 (English) or 009.mp3 (Tagalog)
+    } else {
+      // E7 = "Hindi" (Doesn't get tired easily) - Standard repetition
+      return (userLanguage == "english") ? 15 : 10;  // 0015.mp3 (English) or 0010.mp3 (Tagalog)
+    }
+  }
+  
+  // High-risk category
+  if (userCategory == "high-risk") {
+    if (detectionLevel == "head_chest") {
+      // H1 = "Oo" (Head-level obstacles) - Keep using 002/005
+      return (userLanguage == "english") ? 5 : 2;  // 005.mp3 (English) or 002.mp3 (Tagalog)
+    } else if (terrainVoiceWarning || depthDetection) {
+      // H5 = "Oo" + H1 = "Hindi" (Terrain warnings)
+      // Use terrainVoiceWarning if available, otherwise use depthDetection as fallback
+      return (userLanguage == "english") ? 17 : 12;  // 0017.mp3 (English) or 0012.mp3 (Tagalog)
+    } else {
+      // Default fallback (shouldn't happen, but just in case)
+      return (userLanguage == "english") ? 5 : 2;  // 005.mp3 (English) or 002.mp3 (Tagalog)
+    }
+  }
+  
+  // Default fallback (no category detected yet)
+  return (userLanguage == "english") ? 5 : 2;  // 005.mp3 (English) or 002.mp3 (Tagalog)
 }
 
 // ===================== Ultrasonic =====================
@@ -993,9 +1207,28 @@ void pollHardwareControl() {
     return;
   }
 
-  bool newMotorEnabled = doc["motorEnabled"] | motorEnabled;
-  bool newUltrasonicEnabled = doc["ultrasonicEnabled"] | ultrasonicEnabled;
-  bool newAudioEnabled = doc["audioEnabled"] | audioEnabled;
+  // Read motorEnabled - explicitly check if false is set (not just default)
+  // Read motorEnabled - explicitly check if false is set (not just default)
+  bool newMotorEnabled = motorEnabled; // Default to current value
+  if (doc.containsKey("motorEnabled")) {
+    newMotorEnabled = doc["motorEnabled"].as<bool>();
+  }
+  
+  // Read ultrasonicEnabled - explicitly check
+  bool newUltrasonicEnabled = ultrasonicEnabled; // Default to current value
+  if (doc.containsKey("ultrasonicEnabled")) {
+    newUltrasonicEnabled = doc["ultrasonicEnabled"].as<bool>();
+  }
+  
+  // Read audioEnabled - explicitly check if false is set (CRITICAL: must respect false values)
+  bool newAudioEnabled = audioEnabled; // Default to current value
+  if (doc.containsKey("audioEnabled")) {
+    newAudioEnabled = doc["audioEnabled"].as<bool>();
+    // Explicitly log when audio is disabled
+    if (!newAudioEnabled) {
+      Serial.println("🔇 Audio explicitly DISABLED in Firebase (audioEnabled = false)");
+    }
+  }
   
   // Read language preference (default to "tagalog" if not set)
   String newLanguage = "tagalog";  // Default
@@ -1021,9 +1254,164 @@ void pollHardwareControl() {
     // But for now, just log the change - next detection will use new language
   }
   
-  // Read usage location (affects sensing distance)
+  // Read elderly category behaviors (if available)
+  if (doc.containsKey("sensorRange")) {
+    double newSensorRange = doc["sensorRange"].as<double>();
+    if (newSensorRange != elderlySensorRange) {
+      Serial.println("📏 Sensor range changed: " + String(elderlySensorRange) + " → " + String(newSensorRange) + " cm");
+      elderlySensorRange = newSensorRange;
+      // Apply sensor range to sensing distance
+      // Use sensorRange as max, calculate min as 50% of max
+      sensingDistanceMin = elderlySensorRange * 0.5;
+      sensingDistanceMax = elderlySensorRange;
+      Serial.print("   Sensing range updated: ");
+      Serial.print(sensingDistanceMin);
+      Serial.print("-");
+      Serial.print(sensingDistanceMax);
+      Serial.println("cm");
+    }
+  }
+  
+  if (doc.containsKey("scanningMode")) {
+    String newScanningMode = doc["scanningMode"].as<String>();
+    if (newScanningMode != scanningMode) {
+      Serial.println("🔄 Scanning mode changed: " + scanningMode + " → " + newScanningMode);
+      scanningMode = newScanningMode;
+    }
+  }
+  
+  if (doc.containsKey("vibrationMode")) {
+    String newVibrationMode = doc["vibrationMode"].as<String>();
+    if (newVibrationMode != vibrationMode) {
+      Serial.println("📳 Vibration mode changed: " + vibrationMode + " → " + newVibrationMode);
+      vibrationMode = newVibrationMode;
+      // Map vibration mode to PWM intensity
+      if (vibrationMode == "strong_repeated") {
+        currentVibrationPWM = USE_COIN_MOTOR_MODE ? 255 : 120;
+      } else if (vibrationMode == "normal_pulse") {
+        currentVibrationPWM = USE_COIN_MOTOR_MODE ? 200 : 90;
+      } else if (vibrationMode == "soft_pulse") {
+        currentVibrationPWM = USE_COIN_MOTOR_MODE ? 150 : 60;
+      }
+      Serial.print("   Motor PWM updated: ");
+      Serial.println(currentVibrationPWM);
+    }
+  }
+  
+  if (doc.containsKey("alertCooldown")) {
+    int newAlertCooldown = doc["alertCooldown"].as<int>();
+    if (newAlertCooldown != alertCooldown) {
+      Serial.println("⏱️ Alert cooldown changed: " + String(alertCooldown) + "s → " + String(newAlertCooldown) + "s");
+      alertCooldown = newAlertCooldown;
+    }
+  }
+  
+  if (doc.containsKey("indoorMode")) {
+    bool newIndoorMode = doc["indoorMode"].as<bool>();
+    if (newIndoorMode != indoorMode) {
+      Serial.println("🏠 Indoor mode changed: " + String(indoorMode ? "ON" : "OFF") + " → " + String(newIndoorMode ? "ON" : "OFF"));
+      indoorMode = newIndoorMode;
+      // Adjust sensing distance for indoor mode
+      if (indoorMode) {
+        sensingDistanceMin = 30.0;
+        sensingDistanceMax = 80.0;
+      } else {
+        // Use sensorRange if available, otherwise default
+        if (elderlySensorRange > 0) {
+          sensingDistanceMin = elderlySensorRange * 0.5;
+          sensingDistanceMax = elderlySensorRange;
+        } else {
+          sensingDistanceMin = 50.0;
+          sensingDistanceMax = 100.0;
+        }
+      }
+    }
+  }
+  
+  if (doc.containsKey("alertRepetition")) {
+    int newAlertRepetition = doc["alertRepetition"].as<int>();
+    if (newAlertRepetition != alertRepetition) {
+      Serial.println("🔔 Alert repetition changed: " + String(alertRepetition) + " → " + String(newAlertRepetition) + " (1=LOW, 2=Standard)");
+      alertRepetition = newAlertRepetition;
+    }
+  }
+  
+  if (doc.containsKey("voiceDelay")) {
+    int newVoiceDelay = doc["voiceDelay"].as<int>();
+    if (newVoiceDelay != voiceDelay) {
+      Serial.println("🔊 Voice delay changed: " + String(voiceDelay) + "ms → " + String(newVoiceDelay) + "ms");
+      voiceDelay = newVoiceDelay;
+    }
+  }
+  
+  // Read high-risk category behaviors (if available)
+  if (doc.containsKey("sensorAngle")) {
+    String newSensorAngle = doc["sensorAngle"].as<String>();
+    if (newSensorAngle != sensorAngle) {
+      Serial.println("📐 Sensor angle changed: " + sensorAngle + " → " + newSensorAngle);
+      sensorAngle = newSensorAngle;
+      // If sensorAngle is set, likely high-risk category
+      if (userCategory == "") {
+        userCategory = "high-risk";
+        Serial.println("   Detected user category: high-risk (from sensorAngle)");
+      }
+    }
+  }
+  
+  if (doc.containsKey("detectionLevel")) {
+    String newDetectionLevel = doc["detectionLevel"].as<String>();
+    if (newDetectionLevel != detectionLevel) {
+      Serial.println("🎯 Detection level changed: " + detectionLevel + " → " + newDetectionLevel);
+      detectionLevel = newDetectionLevel;
+      // If detectionLevel is set, likely high-risk category
+      if (userCategory == "") {
+        userCategory = "high-risk";
+        Serial.println("   Detected user category: high-risk (from detectionLevel)");
+      }
+    }
+  }
+  
+  if (doc.containsKey("voiceRepeat")) {
+    bool newVoiceRepeat = doc["voiceRepeat"].as<bool>();
+    if (newVoiceRepeat != voiceRepeat) {
+      Serial.println("🔁 Voice repeat changed: " + String(voiceRepeat ? "ON" : "OFF") + " → " + String(newVoiceRepeat ? "ON" : "OFF"));
+      voiceRepeat = newVoiceRepeat;
+    }
+  }
+  
+  if (doc.containsKey("depthDetection")) {
+    bool newDepthDetection = doc["depthDetection"].as<bool>();
+    if (newDepthDetection != depthDetection) {
+      Serial.println("🔍 Depth detection changed: " + String(depthDetection ? "ON" : "OFF") + " → " + String(newDepthDetection ? "ON" : "OFF"));
+      depthDetection = newDepthDetection;
+    }
+  }
+  
+  // Read terrain voice warning (H5) - if available in hardware_control
+  // Note: This might not be in hardware_control, so we'll use depthDetection as fallback
+  if (doc.containsKey("terrainVoiceWarning")) {
+    bool newTerrainVoiceWarning = doc["terrainVoiceWarning"].as<bool>();
+    if (newTerrainVoiceWarning != terrainVoiceWarning) {
+      Serial.println("🔊 Terrain voice warning changed: " + String(terrainVoiceWarning ? "ON" : "OFF") + " → " + String(newTerrainVoiceWarning ? "ON" : "OFF"));
+      terrainVoiceWarning = newTerrainVoiceWarning;
+    }
+  } else {
+    // Fallback: If terrainVoiceWarning not in hardware_control, use depthDetection as indicator
+    // (H4 = "Oo" usually means terrain is enabled, and H5 = "Oo" means voice is enabled)
+    terrainVoiceWarning = depthDetection;  // Use depthDetection as proxy for terrain voice
+  }
+  
+  // Detect user category from behaviors
+  // If sensorRange is set, it's elderly category
+  if (doc.containsKey("sensorRange") && userCategory == "") {
+    userCategory = "elderly";
+    Serial.println("   Detected user category: elderly (from sensorRange)");
+  }
+
+  // Read usage location (affects sensing distance) - for high-risk category or fallback
   String newUsageLocation = doc["usageLocation"] | usageLocation;
-  if (newUsageLocation != usageLocation) {
+  if (newUsageLocation != usageLocation && !doc.containsKey("sensorRange")) {
+    // Only apply if sensorRange not set (i.e., not elderly category)
     Serial.println("📍 Usage location changed: " + usageLocation + " → " + newUsageLocation);
     usageLocation = newUsageLocation;
     // Adjust sensing distance based on location
@@ -1084,8 +1472,9 @@ void pollHardwareControl() {
     }
     
     lastRestartTime = millis(); // Record restart time
-    Serial.println("   Restarting ESP32 in 2 seconds...");
-    delay(2000);
+    startupAudioInitialized = false; // Reset audio guard for next startup
+    Serial.println("   Restarting ESP32 in 1 second...");
+    delay(1000); // Reduced from 2 seconds to 1 second for faster restart
     ESP.restart();
     return; // This won't execute, but good practice
   }
@@ -1150,6 +1539,14 @@ void pollHardwareControl() {
   Serial.println("   usageLocation = " + usageLocation);
   Serial.println("   vibrationIntensity = " + vibrationIntensity);
   Serial.println("   volume = " + volume);
+  Serial.println("   userCategory = " + (userCategory.length() > 0 ? userCategory : "not set"));
+  if (userCategory == "high-risk") {
+    Serial.println("   sensorAngle = " + sensorAngle);
+    Serial.println("   detectionLevel = " + detectionLevel);
+    Serial.println("   voiceRepeat = " + String(voiceRepeat ? "true" : "false"));
+    Serial.println("   depthDetection = " + String(depthDetection ? "true" : "false"));
+    Serial.println("   terrainVoiceWarning = " + String(terrainVoiceWarning ? "true" : "false"));
+  }
   Serial.print("   Sensing range: ");
   Serial.print(sensingDistanceMin);
   Serial.print("-");
@@ -1219,6 +1616,21 @@ void setup() {
   
   motorStop();
 
+  // Battery monitoring ADC setup
+  pinMode(BATTERY_ADC_PIN, INPUT);
+  analogSetAttenuation(ADC_11db); // Set ADC attenuation for 0-3.3V range
+  Serial.print("🔋 Battery monitoring initialized (GPIO");
+  Serial.print(BATTERY_ADC_PIN);
+  Serial.println("/ADC1)");
+  Serial.println("   TP4056 Module Setup:");
+  Serial.println("   1. Connect battery to TP4056 BAT+ and BAT-");
+  Serial.print("   2. Voltage divider: BAT+ → [10kΩ] → GPIO");
+  Serial.print(BATTERY_ADC_PIN);
+  Serial.println(" → [10kΩ] → GND");
+  Serial.println("   3. TP4056 OUT+ → ESP32 VIN (or 3.3V if using regulator)");
+  Serial.println("   4. TP4056 OUT- → ESP32 GND");
+  Serial.println("   5. USB power → TP4056 IN+ and IN- (for charging)");
+  
   // OLED init with error checking
   Wire.begin(21, 22);  // SDA=21, SCL=22 for ESP32
   Serial.println("🔍 Initializing OLED display...");
@@ -1281,11 +1693,15 @@ void setup() {
   // Optional: Uncomment the line below to test motor on startup
   // testMotor();
 
-  // ===================== WiFi Connection =====================
+  // ===================== WiFi Connection (with Fallback) =====================
   Serial.println();
   Serial.println("========================================");
   Serial.println("📶 STARTING WIFI CONNECTION");
   Serial.println("========================================");
+  Serial.print("   Trying ");
+  Serial.print(wifiNetworkCount);
+  Serial.println(" WiFi network(s) in order...");
+  Serial.println();
   
   if (oledReady) {
     display.clearDisplay();
@@ -1294,74 +1710,133 @@ void setup() {
     display.display();
   }
   
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("📶 Connecting to WiFi: ");
-  Serial.print(WIFI_SSID);
-  Serial.print(" (");
-  Serial.print(WIFI_PASSWORD);
-  Serial.println(")");
+  bool wifiConnected = false;
+  String connectedSSID = "";
   
-  int wifiAttempts = 0;
-  while (WiFi.status() != WL_CONNECTED && wifiAttempts < 30) {
-    delay(500);
-    Serial.print(".");
-    wifiAttempts++;
-    
-    // Show WiFi status code every 5 attempts
-    if (wifiAttempts % 5 == 0) {
-      Serial.print(" [Status: ");
-      Serial.print(WiFi.status());
-      Serial.print("] ");
-    }
-  }
-  Serial.println();
-  
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("========================================");
-    Serial.print("✅ WiFi Connected! IP: ");
-    Serial.println(WiFi.localIP());
-    Serial.print("   Signal Strength (RSSI): ");
-    Serial.print(WiFi.RSSI());
-    Serial.println(" dBm");
-    Serial.println("========================================");
+  // Try each WiFi network in order
+  for (int i = 0; i < wifiNetworkCount; i++) {
+    Serial.println("----------------------------------------");
+    Serial.print("📶 Attempt ");
+    Serial.print(i + 1);
+    Serial.print(" of ");
+    Serial.print(wifiNetworkCount);
+    Serial.print(": ");
+    Serial.print(wifiNetworks[i].description);
+    Serial.println();
+    Serial.print("   SSID: ");
+    Serial.println(wifiNetworks[i].ssid);
     
     if (oledReady) {
       display.clearDisplay();
       display.setCursor(0, 0);
-      display.println("WiFi Connected!");
+      display.print("WiFi ");
+      display.print(i + 1);
+      display.print("/");
+      display.print(wifiNetworkCount);
+      display.println();
       display.setCursor(0, 15);
-      display.print("IP: ");
-      display.println(WiFi.localIP().toString());
+      display.print(wifiNetworks[i].ssid);
       display.display();
     }
-    delay(2000);
-  } else {
-    Serial.println("========================================");
-    Serial.println("❌ WiFi Connection Failed!");
-    Serial.println("========================================");
-    Serial.print("   SSID: ");
-    Serial.println(WIFI_SSID);
-    Serial.print("   Password: ");
-    Serial.println(WIFI_PASSWORD);
-    Serial.print("   WiFi Status Code: ");
-    int status = WiFi.status();
-    Serial.println(status);
-    Serial.print("   Status Meaning: ");
-    switch(status) {
-      case WL_IDLE_STATUS: Serial.println("WL_IDLE_STATUS - WiFi is in process of changing between statuses"); break;
-      case WL_NO_SSID_AVAIL: Serial.println("WL_NO_SSID_AVAIL - SSID cannot be reached"); break;
-      case WL_SCAN_COMPLETED: Serial.println("WL_SCAN_COMPLETED - Scan networks is completed"); break;
-      case WL_CONNECTED: Serial.println("WL_CONNECTED - Connected to a WiFi network"); break;
-      case WL_CONNECT_FAILED: Serial.println("WL_CONNECT_FAILED - Connection failed"); break;
-      case WL_CONNECTION_LOST: Serial.println("WL_CONNECTION_LOST - Connection was lost"); break;
-      case WL_DISCONNECTED: Serial.println("WL_DISCONNECTED - Disconnected from network"); break;
-      default: Serial.println("Unknown status"); break;
+    
+    // Disconnect from previous network (if any)
+    WiFi.disconnect();
+    delay(500);
+    
+    // Try to connect to current network
+    WiFi.begin(wifiNetworks[i].ssid, wifiNetworks[i].password);
+    
+    int wifiAttempts = 0;
+    while (WiFi.status() != WL_CONNECTED && wifiAttempts < 30) {
+      delay(500);
+      Serial.print(".");
+      wifiAttempts++;
+      
+      // Show WiFi status code every 5 attempts
+      if (wifiAttempts % 5 == 0) {
+        Serial.print(" [Status: ");
+        Serial.print(WiFi.status());
+        Serial.print("] ");
+      }
     }
+    Serial.println();
+    
+    // Check if connection successful
+    if (WiFi.status() == WL_CONNECTED) {
+      wifiConnected = true;
+      connectedSSID = wifiNetworks[i].ssid;
+      Serial.println("========================================");
+      Serial.print("✅ WiFi Connected! ");
+      Serial.print(wifiNetworks[i].description);
+      Serial.println();
+      Serial.print("   SSID: ");
+      Serial.println(connectedSSID);
+      Serial.print("   IP Address: ");
+      Serial.println(WiFi.localIP());
+      Serial.print("   Signal Strength (RSSI): ");
+      Serial.print(WiFi.RSSI());
+      Serial.println(" dBm");
+      Serial.println("========================================");
+      
+      if (oledReady) {
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        display.println("WiFi Connected!");
+        display.setCursor(0, 15);
+        display.print("SSID: ");
+        display.println(connectedSSID);
+        display.setCursor(0, 30);
+        display.print("IP: ");
+        display.println(WiFi.localIP().toString());
+        display.display();
+      }
+      delay(2000);
+      break; // Exit loop - connection successful
+    } else {
+      // Connection failed for this network
+      Serial.print("❌ Failed to connect to ");
+      Serial.print(wifiNetworks[i].ssid);
+      Serial.print(" (");
+      Serial.print(wifiNetworks[i].description);
+      Serial.println(")");
+      Serial.print("   WiFi Status Code: ");
+      int status = WiFi.status();
+      Serial.println(status);
+      
+      // If this is not the last network, try next one
+      if (i < wifiNetworkCount - 1) {
+        Serial.println("   ⏭️  Trying next WiFi network...");
+        Serial.println();
+        delay(1000); // Brief delay before trying next network
+      }
+    }
+  }
+  
+  // If all networks failed
+  if (!wifiConnected) {
+    Serial.println("========================================");
+    Serial.println("❌ ALL WiFi Networks Failed!");
+    Serial.println("========================================");
+    Serial.println("   Tried the following networks:");
+    for (int i = 0; i < wifiNetworkCount; i++) {
+      Serial.print("   ");
+      Serial.print(i + 1);
+      Serial.print(". ");
+      Serial.print(wifiNetworks[i].ssid);
+      Serial.print(" (");
+      Serial.print(wifiNetworks[i].description);
+      Serial.println(")");
+    }
+    Serial.println();
     Serial.println("   Possible causes:");
-    Serial.println("   1. Wrong WiFi password");
-    Serial.println("   2. WiFi network not in range");
-    Serial.println("   3. WiFi router not broadcasting SSID");
+    Serial.println("   1. All WiFi networks out of range");
+    Serial.println("   2. Wrong WiFi passwords");
+    Serial.println("   3. WiFi routers not broadcasting SSID");
     Serial.println("   4. ESP32 WiFi hardware issue");
+    Serial.println("   5. iPhone hotspot not enabled");
+    Serial.println();
+    Serial.println("   ⚠️  System will continue without WiFi.");
+    Serial.println("   📡 Will try GPRS fallback (if enabled)...");
     Serial.println("========================================");
     
     if (oledReady) {
@@ -1369,8 +1844,9 @@ void setup() {
       display.setCursor(0, 0);
       display.println("WiFi Failed!");
       display.setCursor(0, 15);
-      display.print("Status: ");
-      display.print(status);
+      display.println("All networks");
+      display.setCursor(0, 30);
+      display.println("unavailable");
       display.display();
     }
   }
@@ -1474,8 +1950,9 @@ void setup() {
     // This will read usageLocation, vibrationIntensity, volume, and hardware control flags
     pollHardwareControl();
     
-     // Now play startup audio with correct language
-     if (dfPlayerReady) {
+     // Now play startup audio with correct language (only once)
+     if (!startupAudioInitialized && dfPlayerReady) {
+       startupAudioInitialized = true; // Set guard to prevent duplicate
        int startupFile = getAudioFileNumber(1); // Get correct file based on language (001 or 004)
        Serial.print("🔍 Startup audio selection: baseFile=1, userLanguage=");
        Serial.print(userLanguage);
@@ -1496,8 +1973,10 @@ void setup() {
          startupAudioPlayed = true;  // Mark as played so system can continue
          startupAudioTime = millis();
        }
-     } else {
+     } else if (!dfPlayerReady) {
        Serial.println("⚠️ DFPlayer not ready, skipping startup audio");
+     } else if (startupAudioInitialized) {
+       Serial.println("⚠️ Startup audio already played - skipping duplicate");
      }
     
     if (oledReady) {
@@ -1508,11 +1987,12 @@ void setup() {
     }
     delay(1000);
   } else {
-    // WiFi/Firebase connection failed - play default Tagalog startup audio
+    // WiFi/Firebase connection failed - play default Tagalog startup audio (only once)
     Serial.println();
     Serial.println("⚠️ WiFi/Firebase not connected - using default language (Tagalog)");
      userLanguage = "tagalog";
-     if (dfPlayerReady) {
+     if (!startupAudioInitialized && dfPlayerReady) {
+       startupAudioInitialized = true; // Set guard to prevent duplicate
        int startupFile = getAudioFileNumber(1); // Will use default "tagalog" = 001.mp3
        if (startupFile > 0) {  // Only play if language is not "none"
          player.playFolder(1, startupFile);
@@ -1529,14 +2009,22 @@ void setup() {
          startupAudioPlayed = true;  // Mark as played so system can continue
          startupAudioTime = millis();
        }
-     } else {
+     } else if (!dfPlayerReady) {
        Serial.println("⚠️ DFPlayer not ready, skipping startup audio (no WiFi/Firebase)");
+     } else if (startupAudioInitialized) {
+       Serial.println("⚠️ Startup audio already played - skipping duplicate (no WiFi/Firebase)");
      }
   }
 }
 
 // ===================== Loop =====================
 void loop() {
+  // Check battery voltage periodically
+  if (millis() - lastBatteryCheck > BATTERY_CHECK_INTERVAL) {
+    readBatteryVoltage();
+    lastBatteryCheck = millis();
+  }
+  
   // Simple Serial test - print every loop to verify Serial is working
   static unsigned long loopCounter = 0;
   static unsigned long lastLoopPrint = 0;
@@ -1549,6 +2037,47 @@ void loop() {
     Serial.print(ESP.getFreeHeap());
     Serial.println(" bytes");
     lastLoopPrint = millis();
+  }
+  
+  // Serial command to replay intro audio (type "PLAY_INTRO" in Serial Monitor)
+  if (Serial.available() > 0) {
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+    command.toUpperCase();
+    
+    if (command == "PLAY_INTRO" || command == "INTRO") {
+      Serial.println("🎵 Replaying startup intro audio...");
+      if (dfPlayerReady) {
+        int startupFile = getAudioFileNumber(1); // Get correct file based on language
+        if (startupFile > 0) {
+          player.stop(); // Stop any currently playing audio
+          delay(200);
+          player.playFolder(1, startupFile);
+          Serial.print("✅ Playing intro audio: ");
+          Serial.print(startupFile < 10 ? "00" : "0");
+          Serial.print(startupFile);
+          Serial.print(".mp3 (language=");
+          Serial.print(userLanguage);
+          Serial.println(")");
+        } else {
+          Serial.println("⚠️ Language is 'none' - cannot play intro audio");
+        }
+      } else {
+        Serial.println("❌ DFPlayer not ready - cannot play intro audio");
+      }
+    } else if (command == "BATTERY" || command == "BAT") {
+      Serial.println("🔋 Battery Status:");
+      Serial.print("   Voltage: ");
+      Serial.print(batteryVoltage, 2);
+      Serial.println("V");
+      Serial.print("   Percentage: ");
+      Serial.print(batteryPercentage);
+      Serial.println("%");
+      Serial.print("   ADC Pin: GPIO");
+      Serial.println(BATTERY_ADC_PIN);
+      Serial.print("   ADC Reading: ");
+      Serial.println(analogRead(BATTERY_ADC_PIN));
+    }
   }
 
   // Enable ultrasonic sensor only after startup audio grace period (7 seconds)
@@ -1705,9 +2234,41 @@ void loop() {
   }
 
   // ===================== Ultrasonic Sensor Logic =====================
-  // Calculate distance once (will be used for both logic and display)
-  if (ultrasonicEnabled) {
-    if (ultrasonicEnabledAfterDelay) {
+  // Always read distance for OLED display (even when ultrasonicEnabled is false)
+  // This helps with debugging and ensures OLED always shows sensor readings
+  // Motor and audio are only activated when ultrasonicEnabled is true
+  if (ultrasonicEnabledAfterDelay) {
+    // Apply scanning mode logic (only when enabled)
+    static unsigned long lastScanTime = 0;
+    bool shouldScan = false;
+    
+    if (ultrasonicEnabled) {
+      // Only apply scanning mode when ultrasonic is enabled
+      if (scanningMode == "continuous") {
+        // Continuous: Always scan (every loop)
+        shouldScan = true;
+      } else if (scanningMode == "semi-continuous") {
+        // Semi-continuous: Scan every 500ms
+        if (millis() - lastScanTime >= 500) {
+          shouldScan = true;
+          lastScanTime = millis();
+        }
+      } else { // event-based (default)
+        // Event-based: Scan every 1 second
+        if (millis() - lastScanTime >= 1000) {
+          shouldScan = true;
+          lastScanTime = millis();
+        }
+      }
+    } else {
+      // Ultrasonic disabled but still read for OLED display (slower rate: every 2 seconds)
+      if (millis() - lastScanTime >= 2000) {
+        shouldScan = true;
+        lastScanTime = millis();
+      }
+    }
+    
+    if (shouldScan) {
       // Get distance with averaging for stability
       float rawDistance = getDistance();
       // Apply exponential moving average filter for smoother, more accurate readings
@@ -1719,53 +2280,112 @@ void loop() {
       // BUT we still display them on OLED - just don't activate motor/audio
       if (distance >= MIN_VALID_DISTANCE && distance < MAX_VALID_DISTANCE) {
         // Valid distance reading
-        Serial.print("📏 Distance: ");
-        Serial.print(distance);
-        Serial.println(" cm");
+        static unsigned long lastDistanceLog = 0;
+        if (millis() - lastDistanceLog > 2000) {  // Log every 2 seconds
+          Serial.print("📏 Distance: ");
+          Serial.print(distance);
+          Serial.print(" cm | Range: ");
+          Serial.print(sensingDistanceMin);
+          Serial.print("-");
+          Serial.print(sensingDistanceMax);
+          Serial.print(" cm | Mode: ");
+          Serial.print(scanningMode);
+          Serial.print(" | Ultrasonic: ");
+          Serial.println(ultrasonicEnabled ? "ENABLED" : "DISABLED");
+          lastDistanceLog = millis();
+        }
         
-         // Audio control based on distance
+         // Audio control based on distance (only when ultrasonicEnabled is true)
          // First check: If audio is disabled, stop any playing audio
          if (!audioEnabled && currentAudioState != 0) {
            player.stop();
            currentAudioState = 0;
            Serial.println("🔇 Audio stopped (audio disabled in Firebase)");
          }
-         // NEW LOGIC: Audio plays ONLY when distance is in sensing range (adjusted by usageLocation)
+         // NEW LOGIC: Audio plays ONLY when distance is in sensing range AND ultrasonicEnabled is true
          // Audio loops/continues as long as object is detected in this range
          // Gate audio so that startup voice (001/004) can finish first
          // Require: startupAudioPlayed == true AND at least 4 seconds since it started
-         if (audioEnabled && startupAudioPlayed && millis() - startupAudioTime > 4000) {
+         static unsigned long lastAudioAlert = 0;  // Track last audio alert time for cooldown
+         if (ultrasonicEnabled && audioEnabled && startupAudioPlayed && millis() - startupAudioTime > 4000) {
            if (distance >= sensingDistanceMin && distance <= sensingDistanceMax) {
-             // Object detected in valid range - play audio (005 or 006) and LOOP
-             // Audio will continuously loop as long as object is detected in this range
-             if (currentAudioState != 1) {
-               int audioFile = getAudioFileNumber(3);  // Get correct file (003 or 006)
-               Serial.print("🔍 Audio file selection: baseFile=3, userLanguage=");
-               Serial.print(userLanguage);
-               Serial.print(", selected file=");
-               Serial.println(audioFile);
-               if (audioFile > 0) {  // Only play if language is not "none"
-                 player.stop();  // Stop any currently playing audio first
-                 delay(100);     // Small delay to ensure stop command is processed
-                 player.loop(audioFile);  // Loop the audio file continuously (file in folder 01)
-                 currentAudioState = 1;
-                 Serial.print("🔊 Looping ");
-                 Serial.print(audioFile < 10 ? "00" : "0");
-                 Serial.print(audioFile);
-                 Serial.print(".mp3 (object detected ");
-                 Serial.print(sensingDistanceMin);
-                 Serial.print("-");
-                 Serial.print(sensingDistanceMax);
-                 Serial.print("cm, language=");
+             // Check alert cooldown (elderly behavior) - skip cooldown for high-risk continuous mode
+             bool skipCooldown = (userCategory == "high-risk" && voiceRepeat == true);
+             unsigned long cooldownMs = alertCooldown * 1000;  // Convert seconds to milliseconds
+             if (skipCooldown || millis() - lastAudioAlert >= cooldownMs) {
+               // Object detected in valid range - play audio based on category and settings
+               // NEW MAPPING:
+               // Elderly E7="Oo": 009 (Tagalog) or 0014 (English)
+               // Elderly E7="Hindi": 0010 (Tagalog) or 0015 (English)
+               // High-risk H1="Oo": 002 (Tagalog) or 005 (English)
+               // High-risk H5="Oo" + H1="Hindi": 0012 (Tagalog) or 0017 (English)
+               int audioFile = getDetectionAudioFile();
+               
+               if (currentAudioState != 1 || voiceRepeat) {
+                 Serial.print("🔍 Audio file selection: category=");
+                 Serial.print(userCategory);
+                 Serial.print(", userLanguage=");
                  Serial.print(userLanguage);
-                 Serial.println(") - will loop continuously while object detected");
-               } else {
-                 // Language is "none" - don't play audio
-                 Serial.println("🔇 Audio not playing (language = 'none')");
-                 currentAudioState = 0;
+                 if (userCategory == "elderly") {
+                   Serial.print(", alertRepetition=");
+                   Serial.print(alertRepetition);
+                 } else if (userCategory == "high-risk") {
+                   Serial.print(", detectionLevel=");
+                   Serial.print(detectionLevel);
+                 Serial.print(", depthDetection=");
+                 Serial.print(depthDetection);
+                 Serial.print(", terrainVoiceWarning=");
+                 Serial.print(terrainVoiceWarning);
+                 }
+                 Serial.print(", selected file=");
+                 Serial.println(audioFile);
+                 if (audioFile > 0) {  // Only play if language is not "none"
+                   player.stop();  // Stop any currently playing audio first
+                   delay(voiceDelay);  // Apply voice delay (elderly behavior: 1000ms standard, 3000ms longer)
+                   
+                   // For high-risk with voiceRepeat, continuously loop
+                   if (voiceRepeat) {
+                     player.loop(audioFile);  // Loop continuously
+                   } else {
+                     player.play(audioFile);  // Play once
+                   }
+                   
+                   currentAudioState = 1;
+                   lastAudioAlert = millis();  // Update last alert time for cooldown
+                   Serial.print("🔊 ");
+                   Serial.print(voiceRepeat ? "Looping " : "Playing ");
+                   Serial.print(audioFile < 10 ? "00" : "0");
+                   Serial.print(audioFile);
+                   Serial.print(".mp3 (object detected ");
+                   Serial.print(sensingDistanceMin);
+                   Serial.print("-");
+                   Serial.print(sensingDistanceMax);
+                   Serial.print("cm, language=");
+                   Serial.print(userLanguage);
+                   Serial.print(", cooldown=");
+                   Serial.print(alertCooldown);
+                   Serial.print("s, delay=");
+                   Serial.print(voiceDelay);
+                   Serial.print("ms, repeat=");
+                   Serial.print(voiceRepeat ? "ON" : "OFF");
+                   Serial.println(")");
+                 } else {
+                   // Language is "none" - don't play audio
+                   Serial.println("🔇 Audio not playing (language = 'none')");
+                   currentAudioState = 0;
+                 }
+               }
+               // If audio is already looping and voiceRepeat is true, let it continue
+             } else {
+               // Still in cooldown period
+               static unsigned long lastCooldownLog = 0;
+               if (millis() - lastCooldownLog > 2000) {
+                 Serial.print("⏱️ Audio alert in cooldown (");
+                 Serial.print((cooldownMs - (millis() - lastAudioAlert)) / 1000);
+                 Serial.println("s remaining)");
+                 lastCooldownLog = millis();
                }
              }
-             // If audio is already looping, let it continue
            } else {
              // Object too close or too far - stop audio
              if (currentAudioState != 0) {
@@ -1784,10 +2404,10 @@ void loop() {
            }
          }
         
-         // Motor control based on distance ONLY
-         // NEW LOGIC: Motor vibrates ONLY when distance is in sensing range (adjusted by usageLocation)
+         // Motor control based on distance (only when ultrasonicEnabled is true)
+         // NEW LOGIC: Motor vibrates ONLY when distance is in sensing range AND ultrasonicEnabled is true
          // Motor stops when distance is outside the sensing range
-         if (!motorEnabled) {
+         if (!ultrasonicEnabled || !motorEnabled) {
            // Motor disabled in Firebase - always stop
            motorStop();
            motorPulseState = false;
@@ -1809,6 +2429,39 @@ void loop() {
              Serial.println("cm - too close, ignoring)");
              lastStopLog = millis();
            }
+         } else if (distance >= sensingDistanceMin && distance <= sensingDistanceMax) {
+           // Object in valid sensing range - check cooldown before activating motor
+           static unsigned long lastMotorAlert = 0;
+           unsigned long cooldownMs = alertCooldown * 1000;  // Convert seconds to milliseconds
+           if (millis() - lastMotorAlert >= cooldownMs) {
+             // Apply vibration mode based on elderly behavior
+             if (vibrationMode == "strong_repeated") {
+               // Strong, repeated vibration
+               motorControlByDistance(distance);
+               lastMotorAlert = millis();
+             } else if (vibrationMode == "normal_pulse") {
+               // Normal pulse vibration
+               motorControlByDistance(distance);
+               lastMotorAlert = millis();
+             } else if (vibrationMode == "soft_pulse") {
+               // Soft pulse vibration
+               motorControlByDistance(distance);
+               lastMotorAlert = millis();
+             } else {
+               // Default behavior
+               motorControlByDistance(distance);
+               lastMotorAlert = millis();
+             }
+           } else {
+             // Still in cooldown period
+             static unsigned long lastMotorCooldownLog = 0;
+             if (millis() - lastMotorCooldownLog > 2000) {
+               Serial.print("⏱️ Motor alert in cooldown (");
+               Serial.print((cooldownMs - (millis() - lastMotorAlert)) / 1000);
+               Serial.println("s remaining)");
+               lastMotorCooldownLog = millis();
+             }
+           }
          } else if (distance > sensingDistanceMax) {
            // No object detected (distance > max) - STOP motor immediately
            motorStop();
@@ -1821,47 +2474,6 @@ void loop() {
              Serial.print(sensingDistanceMax);
              Serial.println("cm - no object)");
              lastStopLog2 = millis();
-           }
-         } else if (distance >= sensingDistanceMin && distance <= sensingDistanceMax) {
-           // Object detected in valid range - VIBRATE
-           // Fast pulse for this range, using dynamic PWM based on vibrationIntensity
-           unsigned long currentTime = millis();
-           if (currentTime - lastMotorPulse >= 150) {  // Fast pulse every 150ms
-             motorPulseState = !motorPulseState;
-             digitalWrite(IN1, HIGH);
-             digitalWrite(IN2, LOW);
-             if (motorPulseState) {
-               // For coin motor: Use higher PWM or full ON
-               #if USE_COIN_MOTOR_MODE
-               // Coin motor: Use full PWM value (already set high)
-               analogWrite(ENA, currentVibrationPWM);
-               #else
-               // Regular motor: Use dynamic PWM
-               analogWrite(ENA, currentVibrationPWM);
-               #endif
-             } else {
-               analogWrite(ENA, 0);
-             }
-             lastMotorPulse = currentTime;
-           }
-           static unsigned long lastVibrateLog = 0;
-           if (millis() - lastVibrateLog > 2000) {  // Log every 2 seconds
-             Serial.print("🔔 Motor: Fast pulse (distance ");
-             Serial.print(distance);
-             Serial.print("cm, ");
-             Serial.print(sensingDistanceMin);
-             Serial.print("-");
-             Serial.print(sensingDistanceMax);
-             Serial.print("cm range, PWM: ");
-             Serial.print(currentVibrationPWM);
-             Serial.print("/255, motorEnabled: ");
-             Serial.print(motorEnabled ? "true" : "false");
-             Serial.print(", ultrasonicEnabled: ");
-             Serial.print(ultrasonicEnabled ? "true" : "false");
-             Serial.print(", Coin motor: ");
-             Serial.print(USE_COIN_MOTOR_MODE ? "YES" : "NO");
-             Serial.println(")");
-             lastVibrateLog = millis();
            }
          } else {
            // Safety fallback: if distance is somehow not in expected range, stop motor
@@ -1882,31 +2494,18 @@ void loop() {
             Serial.println("🔔 Motor: Stopped (invalid distance - no object detected)");
           }
         }
-        if (audioEnabled && currentAudioState != 0) {
+        if (ultrasonicEnabled && audioEnabled && currentAudioState != 0) {
           player.stop();
           currentAudioState = 0;
           Serial.println("🔇 Audio stopped (invalid distance reading)");
         }
       }
-    } else {
-      // Waiting for grace period - keep outputs neutral
-      distance = 0;
-      filteredDistance = 0.0;  // Reset filtered distance
-      motorStop();
-      motorPulseState = false;  // Reset pulse state
-      if (audioEnabled && currentAudioState != 0) {
-        player.stop();
-        currentAudioState = 0;
-      }
     }
   } else {
-    // Ultrasonic disabled - stop motor and audio if they were running
-    distance = 0;  // Reset distance when disabled
-    filteredDistance = 0.0;  // Reset filtered distance
+    // Grace period not over yet - don't read sensor, but keep last distance for OLED
+    // Stop motor and audio if they were running
+    motorStop();
     motorPulseState = false;  // Reset motor pulse state
-    if (motorEnabled) {
-      motorStop();
-    }
     if (audioEnabled && currentAudioState != 0) {
       player.stop();
       currentAudioState = 0;
@@ -1914,18 +2513,54 @@ void loop() {
   }
 
   // ===================== OLED Display =====================
+  // OLED re-init and recovery
+  static unsigned long lastOLEDReinit = 0;
+
+  // If OLED is NOT ready, try to initialize every 5 seconds
+  if (!oledReady && millis() - lastOLEDReinit > 5000) {
+    lastOLEDReinit = millis();
+    Serial.println("🔁 OLED not ready - attempting re-initialization...");
+    // Try both common I2C addresses
+    if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C) || display.begin(SSD1306_SWITCHCAPVCC, 0x3D)) {
+      oledReady = true;
+      display.clearDisplay();
+      display.setTextColor(SSD1306_WHITE);
+      display.setTextSize(1);
+      display.setCursor(0, 0);
+      display.println("OLED Recovered");
+      display.display();
+      Serial.println("✅ OLED re-initialized successfully");
+    } else {
+      Serial.println("❌ OLED re-initialization FAILED (check SDA=21, SCL=22, address 0x3C/0x3D)");
+    }
+  }
+
+  // If OLED was ready, still try a light refresh every 30 seconds to recover minor I2C glitches
+  if (oledReady && millis() - lastOLEDReinit > 30000) {
+    lastOLEDReinit = millis();
+    display.clearDisplay();
+    display.display();
+  }
+  
   if (oledReady) {
     display.clearDisplay();
     
-    // Show ultrasonic distance with LARGER text size (size 2) when enabled
-    // ALWAYS show distance, even if invalid (< 2cm)
-    if (ultrasonicEnabled) {
+    // Show ultrasonic distance with LARGER text size (size 2)
+    // ALWAYS show distance reading if available, even if ultrasonicEnabled is false (for debugging)
+    // This helps diagnose issues when there's no internet connection
     if (distance > 0 && distance < 400) {  // Show any reading (including < 2cm)
       display.setTextSize(2);  // Larger text for distance
       display.setCursor(0, 0);
       display.print(distance, 1);
       display.setTextSize(1);  // Smaller text for unit
       display.print(" CM");
+      
+      // Show sensor status if ultrasonic is disabled
+      if (!ultrasonicEnabled) {
+        display.setTextSize(1);
+        display.setCursor(0, 18);
+        display.print("SENSOR: OFF");
+      }
     } else {
       // Completely invalid (0 or >= 400) - show "---"
       display.setTextSize(2);
@@ -1933,9 +2568,18 @@ void loop() {
       display.print("---");
       display.setTextSize(1);
       display.print(" CM");
+      
+      // Show sensor status
+      if (!ultrasonicEnabled) {
+        display.setTextSize(1);
+        display.setCursor(0, 18);
+        display.print("SENSOR: OFF");
+      } else {
+        display.setTextSize(1);
+        display.setCursor(0, 18);
+        display.print("NO DETECTION");
+      }
     }
-  }
-    // If ultrasonic disabled, show nothing (leave blank)
     
     // Reset text size to 1 for other displays
     display.setTextSize(1);
@@ -1946,22 +2590,33 @@ void loop() {
     bool gprsConnected = (currentConnection == CONN_GPRS && gprsReady);
     #endif
 
-    display.setCursor(0, 15);
+    // Adjust Y position to avoid overlap with sensor status
+    int statusY = (distance > 0 && distance < 400 && !ultrasonicEnabled) ? 27 : 15;
+    
+    display.setCursor(0, statusY);
     display.print("WiFi:");
     display.print(wifiConnected ? "OK" : "NO");
 
-    display.setCursor(64, 15);
+    display.setCursor(64, statusY);
     display.print("FB:");
     display.print(firebaseReady ? "OK" : "NO");
 
     #if ENABLE_SIM800L
-    display.setCursor(0, 27);
+    int gprsY = (distance > 0 && distance < 400 && !ultrasonicEnabled) ? 39 : 27;
+    display.setCursor(0, gprsY);
     display.print("GPRS:");
     display.print(gprsConnected ? "OK" : "NO");
     #endif
     
+    // Firebase Database status
+    int dbY = (distance > 0 && distance < 400 && !ultrasonicEnabled) ? 39 : 27;
+    display.setCursor(64, dbY);
+    display.print("DB:");
+    display.print(firebaseReady ? "OK" : "NO");
+    
     // GPS Satellites and Fix status
-    display.setCursor(0, 40);
+    int gpsY = (distance > 0 && distance < 400 && !ultrasonicEnabled) ? 52 : 40;
+    display.setCursor(0, gpsY);
     display.print("Sats: ");
     display.print(gps.satellites.value());
     if (gps.location.isValid()) {
@@ -1970,7 +2625,24 @@ void loop() {
       display.print(" ---");
     }
     
-    display.display();
+    // Battery percentage (small text at bottom right)
+    display.setCursor(64, gpsY);
+    display.print("Bat: ");
+    display.print(batteryPercentage);
+    display.print("%");
+    
+    // Update display (with error handling)
+    try {
+      display.display();
+    } catch (...) {
+      // If display fails, mark OLED as not ready and try to re-initialize next time
+      static unsigned long lastOLEDError = 0;
+      if (millis() - lastOLEDError > 5000) {  // Log error every 5 seconds max
+        Serial.println("⚠️ OLED display error - will attempt re-initialization");
+        oledReady = false;
+        lastOLEDError = millis();
+      }
+    }
   }
   delay(200);
 }

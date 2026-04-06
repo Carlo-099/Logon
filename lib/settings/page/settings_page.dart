@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:logon/services/firebase_service.dart';
+import 'package:firebase_database/firebase_database.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -14,8 +15,12 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _isLoading = false;
   bool _isSaving = false;
 
+  static const int _maxEmergencyEmails = 3;
+  final List<TextEditingController> _emergencyEmailControllers = [];
+
   // Settings state
   String _selectedLanguage = 'tagalog';
+  String _previousLanguage = 'tagalog'; // Track previous language to detect changes
   String _selectedTextSize = 'medium'; // medium or large
   String _vibrationIntensity = 'medium'; // low, medium, high
   String _volume = 'medium'; // low, medium, high
@@ -25,11 +30,65 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _isHoveringLanguage = false; // For hover effect on language dropdown
   bool _isHoveringTextSizeMedium = false; // For hover effect on text size medium
   bool _isHoveringTextSizeLarge = false; // For hover effect on text size large
+  bool _isDarkMode = true; // Dark mode is default
 
   @override
   void initState() {
     super.initState();
+    _emergencyEmailControllers.add(TextEditingController());
     _loadProfilingData();
+  }
+
+  @override
+  void dispose() {
+    for (final c in _emergencyEmailControllers) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _resetEmergencyEmailControllers(List<String> emails) {
+    for (final c in _emergencyEmailControllers) {
+      c.dispose();
+    }
+    _emergencyEmailControllers.clear();
+    final list = emails
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .take(_maxEmergencyEmails)
+        .toList();
+    if (list.isEmpty) {
+      _emergencyEmailControllers.add(TextEditingController());
+    } else {
+      for (final e in list) {
+        _emergencyEmailControllers.add(TextEditingController(text: e));
+      }
+    }
+  }
+
+  void _addEmergencyEmailField() {
+    if (_emergencyEmailControllers.length >= _maxEmergencyEmails) return;
+    setState(() => _emergencyEmailControllers.add(TextEditingController()));
+  }
+
+  void _removeEmergencyEmailField(int index) {
+    if (_emergencyEmailControllers.length <= 1) {
+      _emergencyEmailControllers[0].clear();
+      setState(() {});
+      return;
+    }
+    setState(() {
+      _emergencyEmailControllers[index].dispose();
+      _emergencyEmailControllers.removeAt(index);
+    });
+  }
+
+  List<String> _collectEmergencyEmails() {
+    return _emergencyEmailControllers
+        .map((c) => c.text.trim())
+        .where((s) => s.isNotEmpty)
+        .take(_maxEmergencyEmails)
+        .toList();
   }
 
   Future<void> _loadProfilingData() async {
@@ -41,10 +100,17 @@ class _SettingsPageState extends State<SettingsPage> {
         setState(() {
           _profilingData = data;
           _selectedLanguage = data['language'] ?? 'tagalog';
+          _previousLanguage = _selectedLanguage; // Initialize previous language
           _vibrationIntensity = data['vibrationIntensity'] ?? 'medium';
           _volume = data['volume'] ?? 'medium';
           _usageLocation = data['usageLocation'] ?? 'outdoors';
+          // Use voiceAlertEnabled from profiling, but respect if it's explicitly set to false
           _audioEnabled = data['voiceAlertEnabled'] ?? false;
+          // If voicePreference is false in elderly profiling, audio should be disabled
+          if (data['voicePreference'] == false) {
+            _audioEnabled = false;
+          }
+          _isDarkMode = data['isDarkMode'] ?? true; // Default to dark mode
         });
       }
       
@@ -52,6 +118,12 @@ class _SettingsPageState extends State<SettingsPage> {
       final textSize = await _firebaseService.getTextSize();
       if (textSize != null) {
         setState(() => _selectedTextSize = textSize);
+      }
+
+      final emergency =
+          await _firebaseService.getEmergencyContactEmails();
+      if (mounted) {
+        setState(() => _resetEmergencyEmailControllers(emergency));
       }
     } catch (e) {
       if (mounted) {
@@ -107,6 +179,11 @@ class _SettingsPageState extends State<SettingsPage> {
         volume: _volume,
       );
 
+      // Check if language or critical hardware settings changed - restart on these changes
+      final bool languageChanged = _selectedLanguage != _previousLanguage;
+      final bool audioChanged = _audioEnabled != (_profilingData!['voiceAlertEnabled'] ?? false);
+      final bool criticalChange = languageChanged || audioChanged;
+      
       // Save to hardware_control for ESP32 (this is what ESP32 reads)
       await _firebaseService.saveHardwareControl(
         motorEnabled: motorEnabled,
@@ -116,13 +193,19 @@ class _SettingsPageState extends State<SettingsPage> {
         usageLocation: _usageLocation,
         vibrationIntensity: _vibrationIntensity,
         volume: _volume,
+        restartRequested: criticalChange, // Restart on language or critical hardware changes
       );
+      
+      // Update previous language after save
+      _previousLanguage = _selectedLanguage;
 
       // Save text size to user settings (new field)
       final userId = _firebaseService.getCurrentUserId();
       if (userId != null) {
         await _firebaseService.saveTextSize(_selectedTextSize);
       }
+
+      await _firebaseService.saveEmergencyContactEmails(_collectEmergencyEmails());
 
       // Reload profiling data to reflect changes
       await _loadProfilingData();
@@ -677,6 +760,284 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  /// Up to 3 Gmail (or any) addresses for “GPS lost” alerts. Saving uses the same Save button.
+  Widget _buildEmergencyContactEmails() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Emergency contact emails',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Add 1–3 addresses. When the cane loses GPS / satellite fix, your backend '
+          '(e.g. Cloud Function) can email them the last known location. '
+          'Remove a row with the delete icon, or clear the field.',
+          style: TextStyle(
+            fontSize: 13,
+            color: Colors.white.withValues(alpha: 0.75),
+          ),
+        ),
+        const SizedBox(height: 16),
+        ...List.generate(_emergencyEmailControllers.length, (index) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _emergencyEmailControllers[index],
+                    keyboardType: TextInputType.emailAddress,
+                    style: const TextStyle(color: Colors.black87),
+                    decoration: InputDecoration(
+                      labelText: 'Email ${index + 1}',
+                      hintText: 'name@example.com',
+                      filled: true,
+                      fillColor: Colors.grey[200],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  onPressed: () => _removeEmergencyEmailField(index),
+                  tooltip: 'Remove',
+                ),
+              ],
+            ),
+          );
+        }),
+        if (_emergencyEmailControllers.length < _maxEmergencyEmails)
+          TextButton.icon(
+            onPressed: _addEmergencyEmailField,
+            icon: const Icon(Icons.add, color: Color(0xFF4CAF50)),
+            label: const Text(
+              'Add another email',
+              style: TextStyle(color: Color(0xFF4CAF50)),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // Theme Toggle (Dark/Light Mode)
+  Widget _buildThemeToggle() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'App Theme',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Switch between dark and light mode for the app.',
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+          decoration: BoxDecoration(
+            color: Colors.grey[300],
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    _isDarkMode ? Icons.dark_mode : Icons.light_mode,
+                    color: Colors.black,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    _isDarkMode ? 'Dark Mode' : 'Light Mode',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black,
+                    ),
+                  ),
+                ],
+              ),
+              Switch(
+                value: _isDarkMode,
+                onChanged: (value) {
+                  setState(() => _isDarkMode = value);
+                  // Save theme preference immediately
+                  _saveThemePreference(value);
+                },
+                activeColor: Colors.green,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _saveThemePreference(bool isDarkMode) async {
+    try {
+      final userId = _firebaseService.getCurrentUserId();
+      if (userId != null) {
+        // Save theme to profiling data using Firebase Database directly
+        final database = FirebaseDatabase.instance.ref();
+        await database.child('profiling').child(userId).child('isDarkMode').set(isDarkMode);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving theme: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // Delete Settings Button
+  Widget _buildDeleteSettingsButton() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Delete Profiling Data',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Delete all your profiling data to start fresh. This will reset your settings.',
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey,
+          ),
+        ),
+        const SizedBox(height: 16),
+        ElevatedButton(
+          onPressed: _showDeleteConfirmation,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          child: const Text(
+            'Delete My Profiling Data',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showDeleteConfirmation() async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF2A2A2A),
+        title: const Text(
+          'Delete Profiling Data?',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: const Text(
+          'Are you sure you want to delete all your profiling data? This action cannot be undone.\n\nYou will need to complete profiling again to use the app settings.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldDelete == true) {
+      await _deleteProfilingData();
+    }
+  }
+
+  Future<void> _deleteProfilingData() async {
+    setState(() => _isLoading = true);
+    try {
+      await _firebaseService.deleteProfilingData();
+      
+      // Clear local state
+      setState(() {
+        _profilingData = null;
+        _selectedLanguage = 'tagalog';
+        _previousLanguage = 'tagalog';
+        _selectedTextSize = 'medium';
+        _vibrationIntensity = 'medium';
+        _volume = 'medium';
+        _usageLocation = 'outdoors';
+        _audioEnabled = false;
+        _isDarkMode = true;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profiling data deleted successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error deleting profiling data: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -744,6 +1105,12 @@ class _SettingsPageState extends State<SettingsPage> {
                       _buildTextSize(),
                       const SizedBox(height: 32),
                       _buildHardwareComponents(),
+                      const SizedBox(height: 32),
+                      _buildEmergencyContactEmails(),
+                      const SizedBox(height: 32),
+                      _buildThemeToggle(),
+                      const SizedBox(height: 32),
+                      _buildDeleteSettingsButton(),
                       const SizedBox(height: 60), // Extra space before save button
                     ],
                   ],

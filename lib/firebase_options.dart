@@ -15,6 +15,10 @@ import 'package:flutter/foundation.dart'
 /// );
 /// ```
 class DefaultFirebaseOptions {
+  /// Realtime Database URL (required for regional DB; not set by older FlutterFire output).
+  static const String _realtimeDbUrl =
+      'https://login-4e779-default-rtdb.asia-southeast1.firebasedatabase.app';
+
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
       return web;
@@ -47,6 +51,7 @@ class DefaultFirebaseOptions {
     projectId: 'login-4e779',
     authDomain: 'login-4e779.firebaseapp.com',
     storageBucket: 'login-4e779.firebasestorage.app',
+    databaseURL: _realtimeDbUrl,
     measurementId: 'G-PGDD6CLQ02',
   );
 
@@ -56,6 +61,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '694615851522',
     projectId: 'login-4e779',
     storageBucket: 'login-4e779.firebasestorage.app',
+    databaseURL: _realtimeDbUrl,
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
@@ -64,6 +70,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '694615851522',
     projectId: 'login-4e779',
     storageBucket: 'login-4e779.firebasestorage.app',
+    databaseURL: _realtimeDbUrl,
     iosBundleId: 'com.example.logon',
   );
 
@@ -73,6 +80,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '694615851522',
     projectId: 'login-4e779',
     storageBucket: 'login-4e779.firebasestorage.app',
+    databaseURL: _realtimeDbUrl,
     iosBundleId: 'com.example.logon',
   );
 
@@ -83,6 +91,7 @@ class DefaultFirebaseOptions {
     projectId: 'login-4e779',
     authDomain: 'login-4e779.firebaseapp.com',
     storageBucket: 'login-4e779.firebasestorage.app',
+    databaseURL: _realtimeDbUrl,
     measurementId: 'G-EBF87WKWP9',
   );
 }

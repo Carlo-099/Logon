@@ -14,15 +14,29 @@ class _ProfilingPageState extends State<ProfilingPage> {
   final _firebaseService = FirebaseService();
 
   // Questionnaire state
-  String? _category; // 'elderly', 'blind', 'high-risk'
-  String? _usageLocation; // 'indoors', 'outdoors'
-  bool? _handSensitivity; // true = Yes, false = No
-  String? _vibrationIntensity; // 'low', 'medium', 'high'
-  bool? _voiceAlertEnabled; // true = Yes, false = No
-  String? _language; // 'english', 'filipino', 'none'
+  String? _category; // 'elderly', 'high-risk'
+  
+  // Elderly category specific questions
+  String? _balanceStability; // 'oo_madalas', 'paminsan_minsan', 'hindi'
+  String? _obstacleCollision; // 'madalas', 'paminsan_minsan', 'bihira'
+  bool? _indoorDifficulty; // true = Oo, false = Hindi
+  bool? _voicePreference; // true = Oo, false = Hindi
+  bool? _vibrationNeed; // true = Oo, false = Hindi
+  bool? _walkingFatigue; // true = Oo, false = Hindi
+  
+  // High-risk category - New H1-H6 questions
+  bool? _headLevelObstacle; // H1: true = Oo, false = Hindi
+  String? _preferredWarningType; // H2: 'voice_lamang', 'vibration_lamang', 'pareho'
+  bool? _continuousAssistance; // H3: true = Oo, false = Hindi
+  bool? _unevenTerrain; // H4: true = Oo, false = Hindi
+  bool? _terrainVoiceWarning; // H5: true = Oo, false = Hindi
+  bool? _terrainVibrationAlert; // H6: true = Oo, false = Hindi
+  
+  // Common fields for both categories
+  String? _language; // 'english', 'tagalog' (no 'none' option)
   String? _volume; // 'low', 'medium', 'high'
 
-  int _currentStep = 0;
+  double _currentStep = 0; // Changed to double to support language selection step (4.5)
   bool _isLoading = false;
   bool _isLoadingData = true;
   bool _questionnaireCompleted = false;
@@ -42,10 +56,28 @@ class _ProfilingPageState extends State<ProfilingPage> {
         setState(() {
           _nameController.text = data['name'] ?? '';
           _category = data['category'];
-          _usageLocation = data['usageLocation'];
-          _handSensitivity = data['handSensitivity'];
-          _vibrationIntensity = data['vibrationIntensity'];
-          _voiceAlertEnabled = data['voiceAlertEnabled'];
+          
+          // Load elderly category data
+          if (data['category'] == 'elderly') {
+            _balanceStability = data['balanceStability'];
+            _obstacleCollision = data['obstacleCollision'];
+            _indoorDifficulty = data['indoorDifficulty'];
+            _voicePreference = data['voicePreference'];
+            _vibrationNeed = data['vibrationNeed'];
+            _walkingFatigue = data['walkingFatigue'];
+          }
+          
+          // Load high-risk category data (H1-H6)
+          if (data['category'] == 'high-risk') {
+            _headLevelObstacle = data['headLevelObstacle'];
+            _preferredWarningType = data['preferredWarningType'];
+            _continuousAssistance = data['continuousAssistance'];
+            _unevenTerrain = data['unevenTerrain'];
+            _terrainVoiceWarning = data['terrainVoiceWarning'];
+            _terrainVibrationAlert = data['terrainVibrationAlert'];
+          }
+          
+          // Common fields
           _language = data['language'];
           _volume = data['volume'];
           _questionnaireCompleted = data['questionnaireCompleted'] ?? false;
@@ -70,89 +102,314 @@ class _ProfilingPageState extends State<ProfilingPage> {
     }
   }
 
+  // Calculate cane behaviors from elderly answers
+  Map<String, dynamic> _calculateElderlyBehaviors() {
+    // Default values
+    double sensorRange = 50.0;
+    String scanningMode = 'event-based';
+    String vibrationMode = 'soft_pulse';
+    bool voiceEnabled = false;
+    int alertCooldown = 3;
+    bool indoorMode = false;
+    String language = 'tagalog'; // Default, can be changed in settings
+    
+    // E1: Balance and Stability (base settings)
+    if (_balanceStability == 'oo_madalas') {
+      sensorRange = 100.0;
+      scanningMode = 'continuous';
+      vibrationMode = 'strong_repeated';
+      voiceEnabled = true;
+    } else if (_balanceStability == 'paminsan_minsan') {
+      sensorRange = 70.0;
+      scanningMode = 'semi-continuous';
+      vibrationMode = 'normal_pulse';
+      voiceEnabled = true;
+    } else if (_balanceStability == 'hindi') {
+      sensorRange = 50.0;
+      scanningMode = 'event-based';
+      vibrationMode = 'soft_pulse';
+      voiceEnabled = false;
+    }
+    
+    // E2: Obstacle Collision Experience (can override range and cooldown)
+    if (_obstacleCollision == 'madalas') {
+      sensorRange = 100.0; // Use maximum range
+      alertCooldown = 1; // 1 second cooldown
+      voiceEnabled = true; // Enable voice if not already
+    } else if (_obstacleCollision == 'paminsan_minsan') {
+      sensorRange = sensorRange > 70.0 ? sensorRange : 70.0; // Use higher of E1 or 70
+      alertCooldown = 2; // 2 seconds cooldown
+      voiceEnabled = true; // Enable voice if not already
+    } else if (_obstacleCollision == 'bihira') {
+      sensorRange = sensorRange > 50.0 ? sensorRange : 50.0; // Use higher of E1 or 50
+      alertCooldown = 3; // 3 seconds cooldown
+      // Don't disable voice if E1 already enabled it
+    }
+    
+    // E3: Indoor Movement Difficulty
+    if (_indoorDifficulty == true) {
+      indoorMode = true;
+      voiceEnabled = true; // Enable voice for indoor mode
+    }
+    
+    // E4: Voice Alert Preference (final say on voice)
+    if (_voicePreference == true) {
+      voiceEnabled = true;
+    } else {
+      voiceEnabled = false; // If user says no, disable voice regardless of other answers
+    }
+    
+    // E5: Vibration Feedback Need (final say on vibration)
+    bool vibrationEnabled = _vibrationNeed == true;
+    
+    // E7: Walking Fatigue (affects timing)
+    int alertRepetition = _walkingFatigue == true ? 1 : 2; // LOW = 1, Standard = 2
+    int voiceDelay = _walkingFatigue == true ? 3000 : 1000; // Longer interval = 3s, Standard = 1s
+    
+    return {
+      'sensorRange': sensorRange,
+      'scanningMode': scanningMode,
+      'vibrationMode': vibrationMode,
+      'vibrationEnabled': vibrationEnabled,
+      'voiceEnabled': voiceEnabled,
+      'alertCooldown': alertCooldown,
+      'indoorMode': indoorMode,
+      'language': language,
+      'alertRepetition': alertRepetition,
+      'voiceDelay': voiceDelay,
+    };
+  }
+
   Future<void> _saveProfilingData() async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    // Validate required fields based on flow
+    // Validate required fields based on category
     if (_category == null) {
       _showError("Please select a category");
       return;
     }
 
-    if (_usageLocation == null) {
-      _showError("Please select where you often use the cane");
-      return;
-    }
-
-    if (_handSensitivity == null) {
-      _showError("Please answer the hand sensitivity question");
-      return;
-    }
-
-    // If hand sensitivity is Yes, skip vibration intensity validation
-    // But still need voice alert, language, and volume
-    if (_handSensitivity == false) {
-      // Only check vibration intensity if hand sensitivity is No
-      if (_vibrationIntensity == null) {
-        _showError("Please select vibration intensity preference");
+    // Elderly category validation
+    if (_category == 'elderly') {
+      if (_balanceStability == null) {
+        _showError("Please answer the balance and stability question");
         return;
       }
-    }
-
-    if (_voiceAlertEnabled == null) {
-      _showError("Please answer the voice alert preference question");
-      return;
-    }
-
-    // If voice alert is No, end here
-    if (_voiceAlertEnabled == false) {
+      if (_obstacleCollision == null) {
+        _showError("Please answer the obstacle collision question");
+        return;
+      }
+      if (_indoorDifficulty == null) {
+        _showError("Please answer the indoor movement question");
+        return;
+      }
+      if (_voicePreference == null) {
+        _showError("Please answer the voice preference question");
+        return;
+      }
+      if (_vibrationNeed == null) {
+        _showError("Please answer the vibration need question");
+        return;
+      }
+      if (_walkingFatigue == null) {
+        _showError("Please answer the walking fatigue question");
+        return;
+      }
       await _saveToFirebase();
       return;
     }
 
-    if (_language == null) {
-      _showError("Please select preferred language");
+    // High-risk category validation (H1-H6)
+    if (_headLevelObstacle == null) {
+      _showError("Please answer the head-level obstacle question");
       return;
     }
 
-    if (_volume == null) {
-      _showError("Please select voice alert volume preference");
+    // If H1 is "Oo", validate H2 and H3
+    if (_headLevelObstacle == true) {
+      if (_preferredWarningType == null) {
+        _showError("Please select preferred warning type");
+        return;
+      }
+      if (_continuousAssistance == null) {
+        _showError("Please answer the continuous assistance question");
+        return;
+      }
+      // After H3, save data
+      await _saveToFirebase();
       return;
     }
 
-    await _saveToFirebase();
+    // If H1 is "Hindi", validate H4, H5, H6
+    if (_headLevelObstacle == false) {
+      if (_unevenTerrain == null) {
+        _showError("Please answer the uneven terrain question");
+        return;
+      }
+      if (_terrainVoiceWarning == null) {
+        _showError("Please answer the terrain voice warning question");
+        return;
+      }
+      if (_terrainVibrationAlert == null) {
+        _showError("Please answer the terrain vibration alert question");
+        return;
+      }
+      // After H6, save data
+      await _saveToFirebase();
+      return;
+    }
   }
 
   Future<void> _saveToFirebase() async {
+    // Check if user already has profiling data
+    final existingData = await _firebaseService.getProfilingData();
+    bool hasExistingProfiling = existingData != null && existingData['questionnaireCompleted'] == true;
+    
+    // If user has existing profiling, show confirmation dialog
+    if (hasExistingProfiling) {
+      final shouldReplace = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFF2A2A2A),
+          title: const Text(
+            'Replace Existing Profiling?',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: const Text(
+            'You already have a saved profiling. Do you want to delete the old profiling and save this new one?\n\nNote: Only the latest profiling will be used by the cane.',
+            style: TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false), // Cancel
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true), // Replace
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+              ),
+              child: const Text(
+                'Delete Old & Save New',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      );
+      
+      // If user cancelled, don't save
+      if (shouldReplace != true) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profiling save cancelled. Old data preserved.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+      
+      // User confirmed - delete old profiling first
+      try {
+        await _firebaseService.deleteProfilingData();
+      } catch (e) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error deleting old profiling: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
+
     setState(() {
       _isLoading = true;
     });
 
     try {
-      // Save profiling data
+      if (_category == 'elderly') {
+        // Calculate cane behaviors from elderly answers
+        final behaviors = _calculateElderlyBehaviors();
+        
+        // Save elderly profiling data
       await _firebaseService.saveProfilingData(
         name: _nameController.text.trim(),
-        category: _category!,
-        usageLocation: _usageLocation!,
-        handSensitivity: _handSensitivity ?? false,
-        vibrationIntensity: _handSensitivity == true ? 'none' : (_vibrationIntensity ?? 'medium'),
-        voiceAlertEnabled: _voiceAlertEnabled ?? false,
-        language: _language ?? 'tagalog',
-        volume: _volume ?? 'medium',
-      );
+          category: 'elderly',
+          balanceStability: _balanceStability,
+          obstacleCollision: _obstacleCollision,
+          indoorDifficulty: _indoorDifficulty,
+          voicePreference: _voicePreference,
+          vibrationNeed: _vibrationNeed,
+          walkingFatigue: _walkingFatigue,
+          behaviors: behaviors,
+        );
 
-      // Save hardware control settings for ESP32
+        // Save hardware control for ESP32 with elderly behaviors
       await _firebaseService.saveHardwareControl(
-        motorEnabled: _handSensitivity == false, // Enable motor only if no hand sensitivity
-        ultrasonicEnabled: true, // Always enabled
-        audioEnabled: _voiceAlertEnabled == true, // Enable only if voice alert is Yes
-        language: _language ?? 'tagalog',
-        usageLocation: _usageLocation!,
-        vibrationIntensity: _handSensitivity == true ? 'none' : (_vibrationIntensity ?? 'medium'),
-        volume: _volume ?? 'medium',
-      );
+          motorEnabled: behaviors['vibrationEnabled'] as bool,
+          ultrasonicEnabled: true,
+          audioEnabled: behaviors['voiceEnabled'] as bool,
+          language: behaviors['language'] as String,
+          usageLocation: behaviors['indoorMode'] as bool ? 'indoors' : 'outdoors',
+          vibrationIntensity: _mapVibrationModeToIntensity(behaviors['vibrationMode'] as String),
+          volume: 'medium', // Default for elderly
+          // Elderly specific behaviors
+          sensorRange: behaviors['sensorRange'] as double,
+          scanningMode: behaviors['scanningMode'] as String,
+          vibrationMode: behaviors['vibrationMode'] as String,
+          alertCooldown: behaviors['alertCooldown'] as int,
+          indoorMode: behaviors['indoorMode'] as bool,
+          alertRepetition: behaviors['alertRepetition'] as int,
+          voiceDelay: behaviors['voiceDelay'] as int,
+        );
+      } else if (_category == 'high-risk') {
+        // Calculate cane behaviors from high-risk answers
+        final behaviors = _calculateHighRiskBehaviors();
+        
+        // Save high-risk profiling data
+        await _firebaseService.saveProfilingData(
+          name: _nameController.text.trim(),
+          category: 'high-risk',
+          headLevelObstacle: _headLevelObstacle,
+          preferredWarningType: _preferredWarningType,
+          continuousAssistance: _continuousAssistance,
+          unevenTerrain: _unevenTerrain,
+          terrainVoiceWarning: _terrainVoiceWarning,
+          terrainVibrationAlert: _terrainVibrationAlert,
+          language: _language ?? 'tagalog',
+          volume: _volume ?? 'medium',
+        );
+
+        // Save hardware control for ESP32 with high-risk behaviors
+        await _firebaseService.saveHardwareControl(
+          motorEnabled: behaviors['vibrationEnabled'] as bool,
+          ultrasonicEnabled: true,
+          audioEnabled: behaviors['voiceEnabled'] as bool,
+          language: behaviors['language'] as String,
+          usageLocation: 'outdoors', // Default for high-risk
+          vibrationIntensity: behaviors['vibrationIntensity'] as String,
+          volume: _volume ?? 'medium',
+          // High-risk specific behaviors
+          sensorAngle: behaviors['sensorAngle'] as String?,
+          detectionLevel: behaviors['detectionLevel'] as String?,
+          scanningMode: behaviors['scanningMode'] as String?,
+          voiceRepeat: behaviors['voiceRepeat'] as bool?,
+          depthDetection: behaviors['depthDetection'] as bool?,
+          terrainVoiceWarning: behaviors['terrainVoiceWarning'] as bool?, // H5: Terrain voice warning
+        );
+      }
 
       setState(() {
         _questionnaireCompleted = true;
@@ -184,6 +441,112 @@ class _ProfilingPageState extends State<ProfilingPage> {
     }
   }
 
+  // Calculate cane behaviors from high-risk answers
+  Map<String, dynamic> _calculateHighRiskBehaviors() {
+    // Default values
+    String sensorAngle = 'forward';
+    String? detectionLevel;
+    bool voiceEnabled = false;
+    bool vibrationEnabled = false;
+    String vibrationIntensity = 'medium';
+    String scanningMode = 'event-based';
+    bool voiceRepeat = false;
+    bool depthDetection = false;
+    String language = _language ?? 'tagalog';
+    
+    // H1: Head-Level Obstacle Risk
+    if (_headLevelObstacle == true) {
+      // Sensor angle: UPWARD, Detection level: Head/chest
+      sensorAngle = 'upward';
+      detectionLevel = 'head_chest';
+      
+      // Voice: "002 or 005" (depends on language)
+      voiceEnabled = true;
+      
+      // Vibration: Strong pulse
+      vibrationEnabled = true;
+      vibrationIntensity = 'high';
+      
+      // H2: Preferred Warning Type
+      if (_preferredWarningType == 'voice_lamang') {
+        voiceEnabled = true;
+        vibrationEnabled = false;
+      } else if (_preferredWarningType == 'vibration_lamang') {
+        voiceEnabled = false;
+        vibrationEnabled = true;
+      } else if (_preferredWarningType == 'pareho') {
+        voiceEnabled = true;
+        vibrationEnabled = true;
+      }
+      
+      // H3: Continuous Assistance
+      if (_continuousAssistance == true) {
+        scanningMode = 'continuous';
+        voiceRepeat = true;
+      } else {
+        scanningMode = 'event-based';
+        voiceRepeat = false;
+      }
+    } else {
+      // H1 is "Hindi" - Standard forward scanning
+      sensorAngle = 'forward';
+      
+      // H4: Uneven or Deep Terrain Experience
+      if (_unevenTerrain == true) {
+        // Sensor angle: DOWNWARD, Depth detection: ON
+        sensorAngle = 'downward';
+        depthDetection = true;
+      } else {
+        // Standard forward scanning
+        sensorAngle = 'forward';
+        depthDetection = false;
+      }
+      
+      // H5: Terrain Voice Warning
+      if (_terrainVoiceWarning == true) {
+        voiceEnabled = true;
+      } else {
+        voiceEnabled = false;
+      }
+      
+      // H6: Vibration Alert for Terrain
+      if (_terrainVibrationAlert == true) {
+        vibrationEnabled = true;
+        vibrationIntensity = 'medium';
+      } else {
+        vibrationEnabled = false;
+      }
+    }
+    
+    return {
+      'sensorAngle': sensorAngle,
+      'detectionLevel': detectionLevel,
+      'terrainVoiceWarning': _terrainVoiceWarning, // H5: Terrain voice warning
+      'voiceEnabled': voiceEnabled,
+      'vibrationEnabled': vibrationEnabled,
+      'vibrationIntensity': vibrationIntensity,
+      'scanningMode': scanningMode,
+      'voiceRepeat': voiceRepeat,
+      'depthDetection': depthDetection,
+      'terrainVoiceWarning': _terrainVoiceWarning, // H5: Terrain voice warning
+      'language': language,
+    };
+  }
+
+  // Helper to map vibration mode to intensity
+  String _mapVibrationModeToIntensity(String mode) {
+    switch (mode) {
+      case 'strong_repeated':
+        return 'high';
+      case 'normal_pulse':
+        return 'medium';
+      case 'soft_pulse':
+        return 'low';
+      default:
+        return 'medium';
+    }
+  }
+
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -198,41 +561,72 @@ class _ProfilingPageState extends State<ProfilingPage> {
       _showError("Please select a category");
       return;
     }
-    if (_currentStep == 1 && _usageLocation == null) {
-      _showError("Please select where you often use the cane");
-      return;
-    }
-    if (_currentStep == 2 && _handSensitivity == null) {
-      _showError("Please answer the hand sensitivity question");
-      return;
-    }
-    // If hand sensitivity is Yes, should have already saved and ended
-    if (_currentStep == 2 && _handSensitivity == true) {
-      // This should not happen as it auto-saves, but just in case
-      _saveProfilingData();
-      return;
-    }
-    if (_currentStep == 3 && _vibrationIntensity == null) {
-      _showError("Please select vibration intensity");
-      return;
-    }
-    if (_currentStep == 4 && _voiceAlertEnabled == null) {
-      _showError("Please answer the voice alert question");
-      return;
-    }
-    // If voice alert is No, should have already saved and ended
-    if (_currentStep == 4 && _voiceAlertEnabled == false) {
-      // This should not happen as it auto-saves, but just in case
-      _saveProfilingData();
-      return;
-    }
-    if (_currentStep == 5 && _language == null) {
-      _showError("Please select preferred language");
-      return;
-    }
-    if (_currentStep == 6 && _volume == null) {
-      _showError("Please select volume preference");
-      return;
+
+    // Elderly category validation
+    if (_category == 'elderly') {
+      if (_currentStep == 1 && _balanceStability == null) {
+        _showError("Please answer the balance and stability question");
+        return;
+      }
+      if (_currentStep == 2 && _obstacleCollision == null) {
+        _showError("Please answer the obstacle collision question");
+        return;
+      }
+      if (_currentStep == 3 && _indoorDifficulty == null) {
+        _showError("Please answer the indoor movement question");
+        return;
+      }
+      if (_currentStep == 4 && _voicePreference == null) {
+        _showError("Please answer the voice preference question");
+        return;
+      }
+      if (_currentStep == 5 && _vibrationNeed == null) {
+        _showError("Please answer the vibration need question");
+        return;
+      }
+      // Step 6 (walking fatigue) auto-saves, so no validation needed here
+    } else if (_category == 'high-risk') {
+      // High-risk category validation (H1-H6)
+      if (_currentStep == 1 && _headLevelObstacle == null) {
+        _showError("Please answer the head-level obstacle question");
+        return;
+      }
+      
+      // If H1 is "Oo", validate H2 and H3
+      if (_headLevelObstacle == true) {
+        if (_currentStep == 2 && _preferredWarningType == null) {
+          _showError("Please select preferred warning type");
+          return;
+        }
+        if (_currentStep == 3 && _continuousAssistance == null) {
+          _showError("Please answer the continuous assistance question");
+          return;
+        }
+        // H3 auto-saves, so no need to increment step
+        if (_currentStep == 3) {
+          return; // Will be saved by button click
+        }
+      }
+      
+      // If H1 is "Hindi", validate H4, H5, H6
+      if (_headLevelObstacle == false) {
+        if (_currentStep == 4 && _unevenTerrain == null) {
+          _showError("Please answer the uneven terrain question");
+          return;
+        }
+        if (_currentStep == 5 && _terrainVoiceWarning == null) {
+          _showError("Please answer the terrain voice warning question");
+          return;
+        }
+        if (_currentStep == 6 && _terrainVibrationAlert == null) {
+          _showError("Please answer the terrain vibration alert question");
+          return;
+        }
+        // H6 auto-saves, so no need to increment step
+        if (_currentStep == 6) {
+          return; // Will be saved by button click
+        }
+      }
     }
 
     setState(() {
@@ -243,7 +637,17 @@ class _ProfilingPageState extends State<ProfilingPage> {
   void _previousStep() {
     if (_currentStep > 0) {
       setState(() {
-        _currentStep--;
+        // Handle conditional flow for high-risk category
+        if (_category == 'high-risk') {
+          // If going back from H4 and H1 was "Oo", skip to H3
+          if (_currentStep == 4 && _headLevelObstacle == true) {
+            _currentStep = 3;
+          } else {
+            _currentStep--;
+          }
+        } else {
+          _currentStep--;
+        }
       });
     }
   }
@@ -317,55 +721,6 @@ class _ProfilingPageState extends State<ProfilingPage> {
           ),
         ),
         const SizedBox(height: 24),
-        // Blind Category Card
-        InkWell(
-          onTap: () {
-            setState(() => _category = 'blind');
-            _nextStep();
-          },
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _category == 'blind' ? Colors.blue : Colors.grey,
-                width: 2,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
-                  child: Image.asset(
-                    'assets/images/blind.jpg',
-                    width: double.infinity,
-                    height: 150,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        height: 150,
-                        color: Colors.grey[300],
-                        child: const Icon(Icons.image, size: 50),
-                      );
-                    },
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    'Blind',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
         // High-Risk Category Card
         InkWell(
           onTap: () {
@@ -418,24 +773,21 @@ class _ProfilingPageState extends State<ProfilingPage> {
     );
   }
 
-  Widget _buildUsageLocation() {
-    // Category-specific question wording
-    String questionText;
-    if (_category == 'blind') {
-      questionText = 'Where does the user often use the cane?';
-    } else if (_category == 'elderly') {
-      questionText = 'Where do you often use the cane?';
-    } else {
-      // high-risk
-      questionText = 'Where do you often use the cane?';
-    }
-
+  // ===================== ELDERLY CATEGORY QUESTIONS =====================
+  
+  // E1: Balance and Stability
+  // Old widget builders removed - not used anymore (replaced with H1-H6 for high-risk)
+  
+  // ===================== ELDERLY CATEGORY QUESTIONS =====================
+  
+  // E1: Balance and Stability
+  Widget _buildE1BalanceStability() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          questionText,
-          style: const TextStyle(
+        const Text(
+          'Nahihirapan ka bang panatilihin ang balanse habang naglalakad?',
+          style: TextStyle(
             fontSize: 28,
             fontWeight: FontWeight.bold,
             color: Colors.white,
@@ -443,30 +795,30 @@ class _ProfilingPageState extends State<ProfilingPage> {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 40),
-        // Indoors Button
+        // Oo, madalas Button
         InkWell(
           onTap: () {
-            setState(() => _usageLocation = 'indoors');
+            setState(() => _balanceStability = 'oo_madalas');
             _nextStep();
           },
           child: Container(
             height: 60,
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: _usageLocation == 'indoors'
+                colors: _balanceStability == 'oo_madalas'
                     ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
                     : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
               ),
               borderRadius: BorderRadius.circular(12),
-              border: _usageLocation == 'indoors'
+              border: _balanceStability == 'oo_madalas'
                   ? Border.all(color: Colors.white, width: 2)
                   : null,
             ),
             child: const Center(
               child: Text(
-                'Indoors',
+                'Oo, madalas',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -477,30 +829,64 @@ class _ProfilingPageState extends State<ProfilingPage> {
           ),
         ),
         const SizedBox(height: 24),
-        // Outdoors Button
+        // Paminsan-minsan Button
         InkWell(
           onTap: () {
-            setState(() => _usageLocation = 'outdoors');
+            setState(() => _balanceStability = 'paminsan_minsan');
             _nextStep();
           },
           child: Container(
             height: 60,
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: _usageLocation == 'outdoors'
+                colors: _balanceStability == 'paminsan_minsan'
                     ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
                     : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
               ),
               borderRadius: BorderRadius.circular(12),
-              border: _usageLocation == 'outdoors'
+              border: _balanceStability == 'paminsan_minsan'
                   ? Border.all(color: Colors.white, width: 2)
                   : null,
             ),
             child: const Center(
               child: Text(
-                'Outdoors',
+                'Paminsan-minsan',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Hindi Button
+        InkWell(
+          onTap: () {
+            setState(() => _balanceStability = 'hindi');
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _balanceStability == 'hindi'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _balanceStability == 'hindi'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Hindi',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -514,24 +900,14 @@ class _ProfilingPageState extends State<ProfilingPage> {
     );
   }
 
-  Widget _buildHandSensitivity() {
-    // Category-specific question wording
-    String questionText;
-    if (_category == 'blind') {
-      questionText = 'Does the user have any sensitivity in their hands that would make vibration uncomfortable?';
-    } else if (_category == 'elderly') {
-      questionText = 'Do you have any sensitivity in your hands that would make vibration uncomfortable?';
-    } else {
-      // high-risk
-      questionText = 'Do you have any sensitivity in your hands that would make vibration uncomfortable?';
-    }
-
+  // E2: Obstacle Collision Experience
+  Widget _buildE2ObstacleCollision() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          questionText,
-          style: const TextStyle(
+        const Text(
+          'Nakararanas ka ba ng banggaan sa mga bagay habang naglalakad?',
+          style: TextStyle(
             fontSize: 28,
             fontWeight: FontWeight.bold,
             color: Colors.white,
@@ -539,122 +915,244 @@ class _ProfilingPageState extends State<ProfilingPage> {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 40),
-        // Yes Button
+        // Madalas Button
         InkWell(
           onTap: () {
-            setState(() => _handSensitivity = true);
-            // If Yes is selected, skip vibration intensity and go to voice alert
-            // Vibration is not applicable, but voice alert can still be used
+            setState(() => _obstacleCollision = 'madalas');
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _obstacleCollision == 'madalas'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _obstacleCollision == 'madalas'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Madalas',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Paminsan-minsan Button
+        InkWell(
+          onTap: () {
+            setState(() => _obstacleCollision = 'paminsan_minsan');
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _obstacleCollision == 'paminsan_minsan'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _obstacleCollision == 'paminsan_minsan'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Paminsan-minsan',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Bihira Button
+        InkWell(
+          onTap: () {
+            setState(() => _obstacleCollision = 'bihira');
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _obstacleCollision == 'bihira'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _obstacleCollision == 'bihira'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Bihira',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // E3: Indoor Movement Difficulty
+  Widget _buildE3IndoorDifficulty() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Nahihirapan ka bang gumalaw sa loob ng bahay o gusali?',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Oo Button
+        InkWell(
+          onTap: () {
+            setState(() => _indoorDifficulty = true);
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _indoorDifficulty == true
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _indoorDifficulty == true
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Oo',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Hindi Button
+        InkWell(
+          onTap: () {
+            setState(() => _indoorDifficulty = false);
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _indoorDifficulty == false
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _indoorDifficulty == false
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Hindi',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // E4: Voice Alert Preference
+  Widget _buildE4VoicePreference() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Mas nakakatulong ba sa iyo ang nagsasalitang babala?',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Oo Button
+        InkWell(
+          onTap: () {
+            setState(() {
+              _voicePreference = true;
+              // Don't increment step yet - will show language selection next
+            });
+            // Go to language selection step (inserted dynamically)
             Future.delayed(const Duration(milliseconds: 300), () {
               setState(() {
-                _currentStep = 4; // Go directly to Voice Alert Preference (skip Vibration Intensity)
+                _currentStep = 4.5; // Use 4.5 as language selection step
               });
             });
           },
           child: Container(
             height: 60,
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF6C5CE7), Color(0xFF5A4FCF)],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Center(
-              child: Text(
-                'Yes',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
-        // No Button
-        InkWell(
-          onTap: () {
-            setState(() => _handSensitivity = false);
-            _nextStep();
-          },
-          child: Container(
-            height: 60,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF6C5CE7), Color(0xFF5A4FCF)],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Center(
-              child: Text(
-                'No',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildVibrationIntensity() {
-    // Category-specific question wording
-    String questionText;
-    if (_category == 'blind') {
-      questionText = 'What is the user\'s preferred vibration intensity?';
-    } else if (_category == 'elderly') {
-      questionText = 'Vibration Intensity Preference';
-    } else {
-      // high-risk
-      questionText = 'Vibration Intensity Preference';
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          questionText,
-          style: const TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 40),
-        // Low Button
-        InkWell(
-          onTap: () {
-            setState(() => _vibrationIntensity = 'low');
-            _nextStep();
-          },
-          child: Container(
-            height: 60,
-            decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: _vibrationIntensity == 'low'
+                colors: _voicePreference == true
                     ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
                     : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
               ),
               borderRadius: BorderRadius.circular(12),
-              border: _vibrationIntensity == 'low'
+              border: _voicePreference == true
                   ? Border.all(color: Colors.white, width: 2)
                   : null,
             ),
             child: const Center(
               child: Text(
-                'Low',
+                'Oo',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -665,156 +1163,88 @@ class _ProfilingPageState extends State<ProfilingPage> {
           ),
         ),
         const SizedBox(height: 24),
-        // Medium Button
+        // Hindi Button
         InkWell(
           onTap: () {
-            setState(() => _vibrationIntensity = 'medium');
-            _nextStep();
-          },
-          child: Container(
-            height: 60,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: _vibrationIntensity == 'medium'
-                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
-                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-              ),
-              borderRadius: BorderRadius.circular(12),
-              border: _vibrationIntensity == 'medium'
-                  ? Border.all(color: Colors.white, width: 2)
-                  : null,
-            ),
-            child: const Center(
-              child: Text(
-                'Medium',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
-        // High Button
-        InkWell(
-          onTap: () {
-            setState(() => _vibrationIntensity = 'high');
-            _nextStep();
-          },
-          child: Container(
-            height: 60,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: _vibrationIntensity == 'high'
-                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
-                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-              ),
-              borderRadius: BorderRadius.circular(12),
-              border: _vibrationIntensity == 'high'
-                  ? Border.all(color: Colors.white, width: 2)
-                  : null,
-            ),
-            child: const Center(
-              child: Text(
-                'High',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildVoiceAlertPreference() {
-    // Category-specific question wording
-    String questionText;
-    if (_category == 'blind') {
-      questionText = 'Does the user prefer voice alert?';
-    } else if (_category == 'elderly') {
-      questionText = 'Do you prefer voice alert?';
-    } else {
-      // high-risk
-      questionText = 'Do you prefer voice alert?';
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          questionText,
-          style: const TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 40),
-        // Yes Button
-        InkWell(
-          onTap: () {
-            setState(() => _voiceAlertEnabled = true);
-            _nextStep();
-          },
-          child: Container(
-            height: 60,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF6C5CE7), Color(0xFF5A4FCF)],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Center(
-              child: Text(
-                'Yes',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
-        // No Button
-        InkWell(
-          onTap: () {
-            setState(() => _voiceAlertEnabled = false);
-            // If No is selected, automatically save and end questionnaire
-            Future.delayed(const Duration(milliseconds: 300), () {
-              _saveProfilingData();
+            setState(() {
+              _voicePreference = false;
+              // Skip language selection, go directly to E5
             });
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _voicePreference == false
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _voicePreference == false
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Hindi',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Elderly Language Selection (after E4 if voice is enabled)
+  Widget _buildElderlyLanguageSelection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Ano ang iyong preferred language?',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Tagalog Button
+        InkWell(
+          onTap: () {
+            setState(() => _language = 'tagalog');
+            // Go to E5 after language selection
             Future.delayed(const Duration(milliseconds: 300), () {
-              _saveProfilingData();
+              setState(() => _currentStep = 5);
             });
           },
           child: Container(
             height: 60,
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF6C5CE7), Color(0xFF5A4FCF)],
+              gradient: LinearGradient(
+                colors: _language == 'tagalog'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
               ),
               borderRadius: BorderRadius.circular(12),
+              border: _language == 'tagalog'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
             ),
             child: const Center(
               child: Text(
-                'No',
+                'Tagalog',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -824,40 +1254,15 @@ class _ProfilingPageState extends State<ProfilingPage> {
             ),
           ),
         ),
-      ],
-    );
-  }
-
-  Widget _buildLanguageSelection() {
-    // Category-specific question wording
-    String questionText;
-    if (_category == 'blind') {
-      questionText = 'What is the user\'s preferred language for voice alert?';
-    } else if (_category == 'elderly') {
-      questionText = 'Preferred Language for Voice Alert';
-    } else {
-      // high-risk
-      questionText = 'Preferred Language for Voice Alert';
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          questionText,
-          style: const TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 40),
+        const SizedBox(height: 24),
         // English Button
         InkWell(
           onTap: () {
             setState(() => _language = 'english');
-            _nextStep();
+            // Go to E5 after language selection
+            Future.delayed(const Duration(milliseconds: 300), () {
+              setState(() => _currentStep = 5);
+            });
           },
           child: Container(
             height: 60,
@@ -886,31 +1291,83 @@ class _ProfilingPageState extends State<ProfilingPage> {
             ),
           ),
         ),
-        const SizedBox(height: 24),
-        // Filipino Button
+      ],
+    );
+  }
+
+  // E5: Vibration Feedback Need
+  Widget _buildE5VibrationNeed() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Mas ramdam mo ba ang babala kapag may vibration?',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Oo Button
         InkWell(
           onTap: () {
-            setState(() => _language = 'filipino');
+            setState(() => _vibrationNeed = true);
             _nextStep();
           },
           child: Container(
             height: 60,
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: _language == 'filipino'
+                colors: _vibrationNeed == true
                     ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
                     : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
               ),
               borderRadius: BorderRadius.circular(12),
-              border: _language == 'filipino'
+              border: _vibrationNeed == true
                   ? Border.all(color: Colors.white, width: 2)
                   : null,
             ),
             child: const Center(
               child: Text(
-                'Filipino',
+                'Oo',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Hindi Button
+        InkWell(
+          onTap: () {
+            setState(() => _vibrationNeed = false);
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _vibrationNeed == false
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _vibrationNeed == false
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Hindi',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -924,24 +1381,14 @@ class _ProfilingPageState extends State<ProfilingPage> {
     );
   }
 
-  Widget _buildVolumeSelection() {
-    // Category-specific question wording
-    String questionText;
-    if (_category == 'blind') {
-      questionText = 'What is the user\'s preferred voice alert volume?';
-    } else if (_category == 'elderly') {
-      questionText = 'Voice Alert Volume Preference';
-    } else {
-      // high-risk
-      questionText = 'Voice Alert Volume Preference';
-    }
-
+  // E7: Walking Fatigue
+  Widget _buildE7WalkingFatigue() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          questionText,
-          style: const TextStyle(
+        const Text(
+          'Madali ka bang mapagod kapag naglalakad?',
+          style: TextStyle(
             fontSize: 28,
             fontWeight: FontWeight.bold,
             color: Colors.white,
@@ -949,29 +1396,30 @@ class _ProfilingPageState extends State<ProfilingPage> {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 40),
-        // Low Button
+        // Oo Button
         InkWell(
           onTap: () {
-            setState(() => _volume = 'low');
+            setState(() => _walkingFatigue = true);
+            // Don't auto-save, let user click Submit button
           },
           child: Container(
             height: 60,
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: _volume == 'low'
+                colors: _walkingFatigue == true
                     ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
                     : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
               ),
               borderRadius: BorderRadius.circular(12),
-              border: _volume == 'low'
+              border: _walkingFatigue == true
                   ? Border.all(color: Colors.white, width: 2)
                   : null,
             ),
             child: const Center(
               child: Text(
-                'Low',
+                'Oo',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -982,62 +1430,30 @@ class _ProfilingPageState extends State<ProfilingPage> {
           ),
         ),
         const SizedBox(height: 24),
-        // Medium Button
+        // Hindi Button
         InkWell(
           onTap: () {
-            setState(() => _volume = 'medium');
+            setState(() => _walkingFatigue = false);
+            // Don't auto-save, let user click Submit button
           },
           child: Container(
             height: 60,
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: _volume == 'medium'
+                colors: _walkingFatigue == false
                     ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
                     : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
               ),
               borderRadius: BorderRadius.circular(12),
-              border: _volume == 'medium'
+              border: _walkingFatigue == false
                   ? Border.all(color: Colors.white, width: 2)
                   : null,
             ),
             child: const Center(
               child: Text(
-                'Medium',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
-        // High Button
-        InkWell(
-          onTap: () {
-            setState(() => _volume = 'high');
-          },
-          child: Container(
-            height: 60,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: _volume == 'high'
-                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
-                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-              ),
-              borderRadius: BorderRadius.circular(12),
-              border: _volume == 'high'
-                  ? Border.all(color: Colors.white, width: 2)
-                  : null,
-            ),
-            child: const Center(
-              child: Text(
-                'High',
+                'Hindi',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -1056,7 +1472,7 @@ class _ProfilingPageState extends State<ProfilingPage> {
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: RadioListTile<String>(
         title: Text(title),
-        value: value,
+          value: value,
         groupValue: groupValue,
         onChanged: (val) => onChanged(val!),
       ),
@@ -1064,44 +1480,789 @@ class _ProfilingPageState extends State<ProfilingPage> {
   }
 
   Widget _buildCurrentStep() {
-    switch (_currentStep) {
-      case 0:
-        return _buildCategorySelection();
-      case 1:
-        return _buildUsageLocation();
-      case 2:
-        return _buildHandSensitivity();
-      case 3:
-        return _buildVibrationIntensity();
-      case 4:
-        return _buildVoiceAlertPreference();
-      case 5:
-        return _buildLanguageSelection();
-      case 6:
-        return _buildVolumeSelection();
-      default:
-        return const SizedBox();
+    // Step 0: Category Selection (always)
+    if (_currentStep == 0) {
+      return _buildCategorySelection();
     }
+    
+    // Elderly category flow (steps 1-6)
+    if (_category == 'elderly') {
+      if (_currentStep == 4.5) {
+        // Language selection step (after E4 if voice is enabled)
+        return _buildElderlyLanguageSelection();
+      }
+      switch (_currentStep.toInt()) {
+        case 1:
+          return _buildE1BalanceStability();
+        case 2:
+          return _buildE2ObstacleCollision();
+        case 3:
+          return _buildE3IndoorDifficulty();
+        case 4:
+          return _buildE4VoicePreference();
+        case 5:
+          return _buildE5VibrationNeed();
+        case 6:
+          return _buildE7WalkingFatigue();
+        default:
+          return const SizedBox();
+      }
+    }
+    
+    // High-risk category flow (H1-H6)
+    if (_category == 'high-risk') {
+      if (_currentStep == 2.5) {
+        // Language selection step (after H2 if voice is selected)
+        return _buildHighRiskLanguageSelection();
+      }
+      switch (_currentStep.toInt()) {
+        case 1:
+          return _buildH1HeadLevelObstacle();
+        case 2:
+          // H2 only shows if H1 is "Oo"
+          if (_headLevelObstacle == true) {
+            return _buildH2PreferredWarningType();
+          } else {
+            // Skip to H4 if H1 is "Hindi"
+            return _buildH4UnevenTerrain();
+          }
+        case 3:
+          // H3 only shows if H1 is "Oo"
+          if (_headLevelObstacle == true) {
+            return _buildH3ContinuousAssistance();
+          } else {
+            // Should not reach here if H1 is "Hindi"
+            return _buildH4UnevenTerrain();
+          }
+        case 4:
+          // H4 shows if H1 is "Hindi" (or as fallback)
+          if (_headLevelObstacle == false) {
+            return _buildH4UnevenTerrain();
+          } else {
+            // Should not reach here if H1 is "Oo"
+            return const SizedBox();
+          }
+        case 5:
+          // H5 only shows if H1 is "Hindi"
+          if (_headLevelObstacle == false) {
+            return _buildH5TerrainVoiceWarning();
+          } else {
+            return const SizedBox();
+          }
+        case 6:
+          // H6 only shows if H1 is "Hindi"
+          if (_headLevelObstacle == false) {
+            return _buildH6TerrainVibrationAlert();
+          } else {
+            return const SizedBox();
+          }
+        default:
+          return const SizedBox();
+      }
+    }
+    
+    return const SizedBox();
+  }
+
+  // High-Risk Language Selection (after H2 if voice is selected)
+  Widget _buildHighRiskLanguageSelection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Ano ang iyong preferred language?',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Tagalog Button
+        InkWell(
+          onTap: () {
+            setState(() => _language = 'tagalog');
+            // Go to H3 after language selection
+            Future.delayed(const Duration(milliseconds: 300), () {
+              setState(() => _currentStep = 3);
+            });
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _language == 'tagalog'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _language == 'tagalog'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Tagalog',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // English Button
+        InkWell(
+          onTap: () {
+            setState(() => _language = 'english');
+            // Go to H3 after language selection
+            Future.delayed(const Duration(milliseconds: 300), () {
+              setState(() => _currentStep = 3);
+            });
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _language == 'english'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _language == 'english'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'English',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ===================== High-Risk Category Widget Builders (H1-H6) =====================
+  
+  // H1: Head-Level Obstacle Risk
+  Widget _buildH1HeadLevelObstacle() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Nakararanas ka ba ng banggaan sa mga bagay na nasa antas ng ulo o dibdib?',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Oo Button
+        InkWell(
+          onTap: () {
+            setState(() => _headLevelObstacle = true);
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _headLevelObstacle == true
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _headLevelObstacle == true
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Oo',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Hindi Button
+        InkWell(
+          onTap: () {
+            setState(() => _headLevelObstacle = false);
+            // Skip H2 and H3, go directly to H4
+            Future.delayed(const Duration(milliseconds: 300), () {
+              setState(() {
+                _currentStep = 4; // H4
+              });
+            });
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _headLevelObstacle == false
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _headLevelObstacle == false
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Hindi',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // H2: Preferred Warning Type
+  Widget _buildH2PreferredWarningType() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Alin ang mas epektibong babala para sa iyo?',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Voice lamang Button
+        InkWell(
+          onTap: () {
+            setState(() => _preferredWarningType = 'voice_lamang');
+            // Show language selection before H3
+            Future.delayed(const Duration(milliseconds: 300), () {
+              setState(() => _currentStep = 2.5); // Use 2.5 as language selection step
+            });
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _preferredWarningType == 'voice_lamang'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _preferredWarningType == 'voice_lamang'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Voice lamang',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Vibration lamang Button
+        InkWell(
+          onTap: () {
+            setState(() => _preferredWarningType = 'vibration_lamang');
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _preferredWarningType == 'vibration_lamang'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _preferredWarningType == 'vibration_lamang'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Vibration lamang',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Pareho Button
+        InkWell(
+          onTap: () {
+            setState(() => _preferredWarningType = 'pareho');
+            // Show language selection before H3
+            Future.delayed(const Duration(milliseconds: 300), () {
+              setState(() => _currentStep = 2.5); // Use 2.5 as language selection step
+            });
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _preferredWarningType == 'pareho'
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _preferredWarningType == 'pareho'
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Pareho',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // H3: Continuous Assistance
+  Widget _buildH3ContinuousAssistance() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Kailangan mo ba ng tuloy-tuloy na babala habang naglalakad?',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Oo Button
+        InkWell(
+          onTap: () {
+            setState(() => _continuousAssistance = true);
+            // After H3, save data (if H1 was Oo)
+            _saveProfilingData();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _continuousAssistance == true
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _continuousAssistance == true
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Oo',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Hindi Button
+        InkWell(
+          onTap: () {
+            setState(() => _continuousAssistance = false);
+            // After H3, save data (if H1 was Oo)
+            _saveProfilingData();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _continuousAssistance == false
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _continuousAssistance == false
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Hindi',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // H4: Uneven or Deep Terrain Experience
+  Widget _buildH4UnevenTerrain() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Nakararanas ka ba ng biglaang pagbaba o hukay sa dinaanan?',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Oo Button
+        InkWell(
+          onTap: () {
+            setState(() => _unevenTerrain = true);
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _unevenTerrain == true
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _unevenTerrain == true
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Oo',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Hindi Button
+        InkWell(
+          onTap: () {
+            setState(() => _unevenTerrain = false);
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _unevenTerrain == false
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _unevenTerrain == false
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Hindi',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // H5: Terrain Voice Warning
+  Widget _buildH5TerrainVoiceWarning() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Gusto mo bang may voice alert kapag may lalim o panganib?',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Oo Button
+        InkWell(
+          onTap: () {
+            setState(() => _terrainVoiceWarning = true);
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _terrainVoiceWarning == true
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _terrainVoiceWarning == true
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Oo',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Hindi Button
+        InkWell(
+          onTap: () {
+            setState(() => _terrainVoiceWarning = false);
+            _nextStep();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _terrainVoiceWarning == false
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _terrainVoiceWarning == false
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Hindi',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // H6: Vibration Alert for Terrain
+  Widget _buildH6TerrainVibrationAlert() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Mas gusto mo bang may vibration kasabay ng babala sa terrain?',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 40),
+        // Oo Button
+        InkWell(
+          onTap: () {
+            setState(() => _terrainVibrationAlert = true);
+            // After H6, save data (if H1 was Hindi)
+            _saveProfilingData();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _terrainVibrationAlert == true
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _terrainVibrationAlert == true
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Oo',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        // Hindi Button
+        InkWell(
+          onTap: () {
+            setState(() => _terrainVibrationAlert = false);
+            // After H6, save data (if H1 was Hindi)
+            _saveProfilingData();
+          },
+          child: Container(
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _terrainVibrationAlert == false
+                    ? [const Color(0xFF6C5CE7), const Color(0xFF5A4FCF)]
+                    : [const Color(0xFF6C5CE7).withOpacity(0.7), const Color(0xFF5A4FCF).withOpacity(0.7)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: _terrainVibrationAlert == false
+                  ? Border.all(color: Colors.white, width: 2)
+                  : null,
+            ),
+            child: const Center(
+              child: Text(
+                'Hindi',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   String _getStepTitle() {
-    switch (_currentStep) {
-      case 0:
-        return 'Category Selection';
-      case 1:
-        return 'Usage Location';
-      case 2:
-        return 'Hand Sensitivity';
-      case 3:
-        return 'Vibration Intensity';
-      case 4:
-        return 'Voice Alert Preference';
-      case 5:
-        return 'Language Selection';
-      case 6:
-        return 'Volume Preference';
-      default:
-        return '';
+    if (_currentStep == 0) {
+      return 'Category Selection';
+    }
+    
+    if (_category == 'elderly') {
+      switch (_currentStep) {
+        case 1:
+          return 'Balance and Stability';
+        case 2:
+          return 'Obstacle Collision';
+        case 3:
+          return 'Indoor Movement';
+        case 4:
+          return 'Voice Preference';
+        case 5:
+          return 'Vibration Need';
+        case 6:
+          return 'Walking Fatigue';
+        default:
+          return '';
+      }
+    } else {
+      // High-risk category
+      switch (_currentStep) {
+        case 1:
+          return 'Usage Location';
+        case 2:
+          return 'Hand Sensitivity';
+        case 3:
+          return 'Vibration Intensity';
+        case 4:
+          return 'Voice Alert Preference';
+        case 5:
+          return 'Language Selection';
+        case 6:
+          return 'Volume Preference';
+        default:
+          return '';
+      }
     }
   }
 
@@ -1358,7 +2519,7 @@ class _ProfilingPageState extends State<ProfilingPage> {
                 controller: _nameController,
                           style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
-                  labelText: _category == 'blind' ? 'User\'s Name' : 'Name',
+                  labelText: 'Name',
                             labelStyle: const TextStyle(color: Colors.white70),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -1376,11 +2537,7 @@ class _ProfilingPageState extends State<ProfilingPage> {
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    if (_category == 'blind') {
-                      return 'Please enter the user\'s name';
-                    } else {
-                      return 'Please enter your name';
-                    }
+                    return 'Please enter your name';
                   }
                   return null;
                 },
@@ -1684,8 +2841,8 @@ class _ProfilingPageState extends State<ProfilingPage> {
               Builder(
                 builder: (context) {
                   bool shouldHideNext = _isLoading ||
-                      (_currentStep == 2 && _handSensitivity == true) ||
-                      (_currentStep == 4 && _voiceAlertEnabled == false);
+                      (_category == 'high-risk' && _currentStep == 3 && _headLevelObstacle == true && _continuousAssistance != null) ||
+                      (_category == 'high-risk' && _currentStep == 6 && _headLevelObstacle == false && _terrainVibrationAlert != null);
                   
                   if (shouldHideNext && _isLoading) {
                     return const Center(

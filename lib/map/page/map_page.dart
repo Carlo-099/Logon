@@ -187,8 +187,9 @@ class _MapPageState extends State<MapPage> {
                 icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
               ),
             },
-            myLocationEnabled: true,
-            myLocationButtonEnabled: true,
+            // Avoid blank/permission issues: we don't request runtime location permission here.
+            myLocationEnabled: false,
+            myLocationButtonEnabled: false,
             mapType: MapType.normal,
             zoomControlsEnabled: true,
             zoomGesturesEnabled: true,

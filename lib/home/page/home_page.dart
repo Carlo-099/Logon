@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:logon/login/page/login_page.dart';
-import 'package:logon/profiling/page/profiling_page.dart';
+import 'package:logon/cane/page/your_cane_page.dart';
 import 'package:logon/map/page/map_page.dart';
 import 'package:logon/services/firebase_service.dart';
 import 'package:logon/settings/page/settings_page.dart';
@@ -214,9 +214,9 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Profiling Section
+                    // Set Up Your Cane Section (replaces profiling)
                     const Text(
-                      'Profiling',
+                      'Set Up Your Cane',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 28,
@@ -224,12 +224,12 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    // Clickable Profiling Container
+                    // Clickable Cane Setup Container
                     InkWell(
                       onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const ProfilingPage()),
+                  MaterialPageRoute(builder: (context) => const YourCanePage()),
                 );
               },
                       child: Container(
@@ -245,7 +245,7 @@ class _HomePageState extends State<HomePage> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    _profilingData?['name'] ?? 'No name set',
+                                    'Your Cane Settings',
                                     style: const TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.bold,
@@ -254,7 +254,7 @@ class _HomePageState extends State<HomePage> {
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
-                                    'Date of Birth: ${_profilingData?['dateOfBirth'] ?? 'Not set'}',
+                                    'Language: ${_profilingData?['language'] ?? 'Not set'}',
                                     style: const TextStyle(
                                       fontSize: 14,
                                       color: Colors.black87,
@@ -262,7 +262,7 @@ class _HomePageState extends State<HomePage> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    'Age: ${_profilingData?['age'] ?? 'N/A'}',
+                                    'Volume: ${_profilingData?['volume'] ?? 'Not set'}',
                                     style: const TextStyle(
                                       fontSize: 14,
                                       color: Colors.black87,
@@ -270,7 +270,7 @@ class _HomePageState extends State<HomePage> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    'Contact no.: ${_profilingData?['contactNo'] ?? 'Not set'}',
+                                    'Tap to customize the cane',
                                     style: const TextStyle(
                                       fontSize: 14,
                                       color: Colors.black87,
@@ -297,7 +297,7 @@ class _HomePageState extends State<HomePage> {
                                       color: Colors.grey[300],
                                     ),
                                     child: const Icon(
-                                      Icons.person,
+                                      Icons.settings,
                                       size: 50,
                                       color: Colors.grey,
                                     ),
@@ -311,7 +311,7 @@ class _HomePageState extends State<HomePage> {
               ),
                     const SizedBox(height: 8),
                     const Text(
-                      "The profiling used to gather user's information.",
+                      "Configure your cane and save settings to Firebase.",
                       style: TextStyle(
                         color: Colors.white70,
                         fontSize: 14,
@@ -378,7 +378,8 @@ class _HomePageState extends State<HomePage> {
                                           strokeWidth: 2,
                                         ),
                                       },
-                                      myLocationEnabled: true,
+                                      // Avoid blank/permission issues: we don't request runtime location permission here.
+                                      myLocationEnabled: false,
                                       myLocationButtonEnabled: false,
                                     );
                                   },
@@ -411,7 +412,8 @@ class _HomePageState extends State<HomePage> {
                                       strokeWidth: 2,
                                     ),
                                   },
-                                  myLocationEnabled: true,
+                                  // Avoid blank/permission issues: we don't request runtime location permission here.
+                                  myLocationEnabled: false,
                                   myLocationButtonEnabled: false,
                                 ),
                         ),

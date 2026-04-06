@@ -31,6 +31,14 @@
 
   <title>logon</title>
   <link rel="manifest" href="manifest.json">
+
+  <!--
+    google_maps_flutter on web needs the Maps JavaScript API loaded before the app runs.
+    Enable "Maps JavaScript API" (and billing) for this key in Google Cloud Console.
+    For web builds, add an HTTP referrer restriction for your domain (e.g. localhost:* for dev).
+    Key matches Android: android/app/src/main/AndroidManifest.xml (com.google.android.geo.API_KEY).
+  -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDW0_t4qt8Wly_ffIpQQLXLPKp0yr_lr2k"></script>  <!--<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDsDKHk24NsVflAJuhCkswY8pc8vboUuPw"></script> -->
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
