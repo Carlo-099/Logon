@@ -459,12 +459,16 @@ class FirebaseService {
     bool? restartRequested, // Optional: only set if restart is needed
   }) async {
     try {
+      final ownerUid = getCurrentUserId();
       final data = {
         'motorEnabled': motorEnabled,
         'ultrasonicEnabled': ultrasonicEnabled,
         'audioEnabled': audioEnabled,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       };
+      if (ownerUid != null && ownerUid.isNotEmpty) {
+        data['ownerUid'] = ownerUid;
+      }
       
       // Add optional fields if provided
       if (language != null) {

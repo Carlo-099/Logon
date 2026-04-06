@@ -118,6 +118,15 @@ const int wifiNetworkCount = sizeof(wifiNetworks) / sizeof(wifiNetworks[0]);
 #define FIREBASE_HOST "login-4e779-default-rtdb.asia-southeast1.firebasedatabase.app"
 #define FIREBASE_AUTH "SHLvLjohXVZ4Vs2PcVW6PvgXY7mqPaw73a0joSTW"
 
+// ===================== EMAIL (Gmail SMTP) =====================
+// Use a Gmail App Password (NOT your normal Gmail password).
+// Google Account → Security → 2-Step Verification → App passwords.
+// Paste your credentials here.
+#define GMAIL_SMTP_HOST "smtp.gmail.com"
+#define GMAIL_SMTP_PORT 465
+#define GMAIL_USER "PASTE_YOUR_GMAIL_HERE"           // e.g. "yourname@gmail.com"
+#define GMAIL_APP_PASSWORD "PASTE_APP_PASSWORD_HERE" // 16-char app password (no spaces)
+
 // ===================== Firebase Objects =====================
 FirebaseData firebaseData;          // General purpose (setup/tests)
 FirebaseData firebaseGPSData;       // Dedicated to GPS updates
@@ -136,6 +145,8 @@ TinyGsm modem(SIM800L_Serial);
 #endif
 
 double lat = 0.0, lon = 0.0;
+double lastKnownLat = 0.0, lastKnownLon = 0.0;
+bool hasLastKnownLocation = false;
 long duration;
 float distance;
 float filteredDistance = 0.0;  // Filtered/averaged distance for stability
@@ -160,6 +171,9 @@ bool systemReady = false;
 
 // ===================== Firebase Control Variables =====================
 unsigned long lastGPSUpdate = 0;
+unsigned long lastValidGpsFixMs = 0;
+unsigned long lastGpsAlertSendMs = 0;
+bool gpsLostAlertActive = false;
 unsigned long lastHardwareCheck = 0;
 unsigned long lastRestartTime = 0;  // Track when we last restarted to prevent restart loops
 bool motorEnabled = false;        // Default to disabled until profiling enables it
@@ -199,6 +213,14 @@ int currentVibrationPWM = VIBRATION_MOTOR_PWM; // Default for regular motor
 float sensingDistanceMin = 50.0;  // Minimum distance for detection (adjusted based on usageLocation)
 float sensingDistanceMax = 100.0; // Maximum distance for detection (adjusted based on usageLocation)
 int audioVolume = 20; // DFPlayer volume (0-30, adjusted based on volume preference)
+
+// ===================== GPS LOST ALERT SETTINGS =====================
+String ownerUid = ""; // Set from /hardware_control/ownerUid by the app
+const unsigned long GPS_LOST_THRESHOLD_MS = 60000;   // 60s without valid fix
+const unsigned long GPS_ALERT_COOLDOWN_MS = 300000;  // 5 minutes between alerts
+const int MAX_EMERGENCY_EMAILS = 3;
+String emergencyEmails[MAX_EMERGENCY_EMAILS];
+int emergencyEmailCount = 0;
 
 // ===================== GPS Update Interval =====================
 // GPS update frequency to Firebase (for real-time tracking on Google Maps)
@@ -971,6 +993,317 @@ void checkConnectionStatus() {
 
 // ===================== Firebase Functions =====================
 
+// --- Base64 helper (SMTP auth) ---
+static const char* _b64 =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+String base64Encode(const String& in) {
+  const uint8_t* bytes = (const uint8_t*)in.c_str();
+  int len = in.length();
+  String out;
+  out.reserve(((len + 2) / 3) * 4);
+  for (int i = 0; i < len; i += 3) {
+    int v = bytes[i];
+    v = i + 1 < len ? (v << 8) | bytes[i + 1] : (v << 8);
+    v = i + 2 < len ? (v << 8) | bytes[i + 2] : (v << 8);
+
+    out += _b64[(v >> 18) & 0x3F];
+    out += _b64[(v >> 12) & 0x3F];
+    out += (i + 1 < len) ? _b64[(v >> 6) & 0x3F] : '=';
+    out += (i + 2 < len) ? _b64[v & 0x3F] : '=';
+  }
+  return out;
+}
+
+bool putJsonToFirebasePath(const String& pathWithAuth, const String& jsonPayload) {
+  bool connected = false;
+  String response = "";
+
+  if (currentConnection == CONN_WIFI) {
+    WiFiClientSecure client;
+    client.setInsecure();
+    if (client.connect(FIREBASE_HOST, 443)) {
+      connected = true;
+      String request = "PUT " + pathWithAuth + " HTTP/1.1\r\n";
+      request += "Host: " + String(FIREBASE_HOST) + "\r\n";
+      request += "Content-Type: application/json\r\n";
+      request += "Content-Length: " + String(jsonPayload.length()) + "\r\n";
+      request += "Connection: close\r\n\r\n";
+      request += jsonPayload;
+      client.print(request);
+
+      unsigned long start = millis();
+      while (client.connected() && !client.available()) {
+        if (millis() - start > 5000) {
+          client.stop();
+          return false;
+        }
+        delay(10);
+      }
+      while (client.available()) response += client.readString();
+      client.stop();
+    }
+#if ENABLE_SIM800L
+  } else if (currentConnection == CONN_GPRS && gprsReady) {
+    TinyGsmClientSecure client(modem);
+    if (client.connect(FIREBASE_HOST, 443)) {
+      connected = true;
+      String request = "PUT " + pathWithAuth + " HTTP/1.1\r\n";
+      request += "Host: " + String(FIREBASE_HOST) + "\r\n";
+      request += "Content-Type: application/json\r\n";
+      request += "Content-Length: " + String(jsonPayload.length()) + "\r\n";
+      request += "Connection: close\r\n\r\n";
+      request += jsonPayload;
+      client.print(request);
+
+      unsigned long start = millis();
+      while (client.connected() && !client.available()) {
+        if (millis() - start > 10000) {
+          client.stop();
+          return false;
+        }
+        delay(10);
+      }
+      while (client.available()) response += client.readString();
+      client.stop();
+    }
+#endif
+  }
+
+  return connected && (response.indexOf("200 OK") > 0 || response.indexOf("{") >= 0);
+}
+
+String getJsonFromFirebasePath(const String& pathWithAuth) {
+  if (currentConnection != CONN_WIFI) {
+    // Keep SMTP + reads WiFi-only for simplicity and reliability.
+    return "";
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  if (!client.connect(FIREBASE_HOST, 443)) return "";
+
+  client.printf("GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n",
+                pathWithAuth.c_str(), FIREBASE_HOST);
+
+  unsigned long start = millis();
+  while (client.connected() && !client.available()) {
+    if (millis() - start > 5000) {
+      client.stop();
+      return "";
+    }
+    delay(10);
+  }
+
+  // Skip headers
+  while (client.available()) {
+    String line = client.readStringUntil('\n');
+    if (line == "\r") break;
+  }
+
+  String body;
+  while (client.available()) {
+    body += client.readString();
+  }
+  client.stop();
+  body.trim();
+  return body;
+}
+
+bool loadEmergencyEmailsFromFirebase() {
+  emergencyEmailCount = 0;
+  if (!firebaseReady) return false;
+  if (ownerUid.length() == 0) return false;
+
+  String path = "/users/" + ownerUid + "/emergency_contacts/emails.json?auth=" + String(FIREBASE_AUTH);
+  String body = getJsonFromFirebasePath(path);
+  if (body.length() == 0 || body == "null") return false;
+
+  StaticJsonDocument<512> doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    Serial.print("⚠️ Failed to parse emergency emails JSON: ");
+    Serial.println(err.c_str());
+    return false;
+  }
+
+  if (!doc.is<JsonArray>()) return false;
+
+  JsonArray arr = doc.as<JsonArray>();
+  for (JsonVariant v : arr) {
+    if (emergencyEmailCount >= MAX_EMERGENCY_EMAILS) break;
+    String e = v.as<String>();
+    e.trim();
+    if (e.length() == 0) continue;
+    emergencyEmails[emergencyEmailCount++] = e;
+  }
+
+  return emergencyEmailCount > 0;
+}
+
+bool smtpReadUntilCode(WiFiClientSecure& client, const char* code, unsigned long timeoutMs = 10000) {
+  String line;
+  unsigned long start = millis();
+  while (millis() - start < timeoutMs) {
+    while (client.available()) {
+      line = client.readStringUntil('\n');
+      line.trim();
+      if (line.length() == 0) continue;
+      // Multi-line responses start with "XYZ-" then end with "XYZ "
+      if (line.startsWith(code)) return true;
+      if (line.length() >= 4 && line.substring(0, 3) == String(code) && line.charAt(3) == ' ') return true;
+    }
+    delay(10);
+  }
+  return false;
+}
+
+bool smtpSendLine(WiFiClientSecure& client, const String& s) {
+  client.print(s);
+  client.print("\r\n");
+  return true;
+}
+
+bool sendEmailViaGmailSMTP(const String& toEmail, const String& subject, const String& bodyText) {
+  if (String(GMAIL_USER).indexOf("PASTE_") == 0) {
+    Serial.println("❌ Gmail credentials not set (edit GMAIL_USER / GMAIL_APP_PASSWORD).");
+    return false;
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  if (!client.connect(GMAIL_SMTP_HOST, GMAIL_SMTP_PORT)) {
+    Serial.println("❌ SMTP connect failed");
+    return false;
+  }
+
+  if (!smtpReadUntilCode(client, "220")) {
+    Serial.println("❌ SMTP: no 220 greeting");
+    client.stop();
+    return false;
+  }
+
+  smtpSendLine(client, "EHLO esp32");
+  if (!smtpReadUntilCode(client, "250")) {
+    Serial.println("❌ SMTP: EHLO failed");
+    client.stop();
+    return false;
+  }
+
+  smtpSendLine(client, "AUTH LOGIN");
+  if (!smtpReadUntilCode(client, "334")) {
+    Serial.println("❌ SMTP: AUTH LOGIN not accepted");
+    client.stop();
+    return false;
+  }
+
+  smtpSendLine(client, base64Encode(String(GMAIL_USER)));
+  if (!smtpReadUntilCode(client, "334")) {
+    Serial.println("❌ SMTP: username rejected");
+    client.stop();
+    return false;
+  }
+
+  smtpSendLine(client, base64Encode(String(GMAIL_APP_PASSWORD)));
+  if (!smtpReadUntilCode(client, "235")) {
+    Serial.println("❌ SMTP: password rejected (use App Password)");
+    client.stop();
+    return false;
+  }
+
+  smtpSendLine(client, "MAIL FROM:<" + String(GMAIL_USER) + ">");
+  if (!smtpReadUntilCode(client, "250")) {
+    Serial.println("❌ SMTP: MAIL FROM failed");
+    client.stop();
+    return false;
+  }
+
+  smtpSendLine(client, "RCPT TO:<" + toEmail + ">");
+  if (!smtpReadUntilCode(client, "250")) {
+    Serial.println("❌ SMTP: RCPT TO failed");
+    client.stop();
+    return false;
+  }
+
+  smtpSendLine(client, "DATA");
+  if (!smtpReadUntilCode(client, "354")) {
+    Serial.println("❌ SMTP: DATA failed");
+    client.stop();
+    return false;
+  }
+
+  // RFC822 message
+  client.print("From: Logon Cane <");
+  client.print(String(GMAIL_USER));
+  client.print(">\r\n");
+  client.print("To: <");
+  client.print(toEmail);
+  client.print(">\r\n");
+  client.print("Subject: ");
+  client.print(subject);
+  client.print("\r\n");
+  client.print("Content-Type: text/plain; charset=utf-8\r\n");
+  client.print("\r\n");
+  client.print(bodyText);
+  client.print("\r\n.\r\n");
+
+  if (!smtpReadUntilCode(client, "250")) {
+    Serial.println("❌ SMTP: message not accepted");
+    client.stop();
+    return false;
+  }
+
+  smtpSendLine(client, "QUIT");
+  client.stop();
+  return true;
+}
+
+void sendGpsLostAlertIfNeeded() {
+  if (!firebaseReady) return;
+  if (ownerUid.length() == 0) return;
+  if (!hasLastKnownLocation) return;
+  if (gpsLostAlertActive) return;
+  if (millis() - lastValidGpsFixMs < GPS_LOST_THRESHOLD_MS) return;
+  if (millis() - lastGpsAlertSendMs < GPS_ALERT_COOLDOWN_MS) return;
+
+  Serial.println("📨 GPS lost detected. Loading emergency emails...");
+  if (!loadEmergencyEmailsFromFirebase()) {
+    Serial.println("⚠️ No emergency emails found in Firebase. Skipping SMTP send.");
+  } else {
+    String mapsLink = "https://www.google.com/maps?q=" + String(lastKnownLat, 6) + "," + String(lastKnownLon, 6);
+    String subject = "Logon cane alert: GPS signal lost";
+    String text =
+      "The cane device reported GPS signal loss.\n\n"
+      "Last known location:\n"
+      "Latitude: " + String(lastKnownLat, 6) + "\n"
+      "Longitude: " + String(lastKnownLon, 6) + "\n\n"
+      "Open in Google Maps:\n" + mapsLink + "\n\n"
+      "If needed, copy-paste the coordinates into Google Maps.\n";
+
+    Serial.print("📧 Sending email to ");
+    Serial.print(emergencyEmailCount);
+    Serial.println(" recipient(s)...");
+
+    bool anyOk = false;
+    for (int i = 0; i < emergencyEmailCount; i++) {
+      Serial.print("   -> ");
+      Serial.println(emergencyEmails[i]);
+      bool ok = sendEmailViaGmailSMTP(emergencyEmails[i], subject, text);
+      Serial.println(ok ? "   ✅ Sent" : "   ❌ Failed");
+      anyOk = anyOk || ok;
+      delay(300);
+    }
+
+    if (anyOk) {
+      gpsLostAlertActive = true;
+      lastGpsAlertSendMs = millis();
+      Serial.println("✅ GPS-lost email alert sent (cooldown started).");
+    } else {
+      Serial.println("❌ All SMTP sends failed.");
+    }
+  }
+}
+
 void updateGPSInFirebase() {
   Serial.println("📤 updateGPSInFirebase() called");
   
@@ -986,6 +1319,11 @@ void updateGPSInFirebase() {
   
   double lat_val = gps.location.lat();
   double lon_val = gps.location.lng();
+  lastKnownLat = lat_val;
+  lastKnownLon = lon_val;
+  hasLastKnownLocation = true;
+  lastValidGpsFixMs = millis();
+  gpsLostAlertActive = false;
   
   Serial.print("📊 Preparing to upload - Lat: ");
   Serial.print(lat_val, 6);
@@ -1429,6 +1767,16 @@ void pollHardwareControl() {
     Serial.print("-");
     Serial.print(sensingDistanceMax);
     Serial.println("cm");
+  }
+
+  // Read owner UID for user-specific GPS-lost alerts
+  if (doc.containsKey("ownerUid")) {
+    String newOwnerUid = doc["ownerUid"].as<String>();
+    if (newOwnerUid != ownerUid) {
+      ownerUid = newOwnerUid;
+      Serial.print("👤 ownerUid updated for alerts: ");
+      Serial.println(ownerUid);
+    }
   }
   
   // Check for restart request (only if we haven't restarted recently to prevent loops)
@@ -2211,6 +2559,7 @@ void loop() {
       lastWarningLog = millis();
     }
   }
+  sendGpsLostAlertIfNeeded();
 
   // ===================== Connection Management =====================
   // Check connection status periodically and switch between WiFi/GPRS
