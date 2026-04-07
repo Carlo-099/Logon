@@ -222,6 +222,13 @@ const int MAX_EMERGENCY_EMAILS = 3;
 String emergencyEmails[MAX_EMERGENCY_EMAILS];
 int emergencyEmailCount = 0;
 
+// ===================== GPS LOST ALERT SENDER CREDS (from Firebase) =====================
+// If set in Firebase, ESP32 uses these instead of the #define values above.
+String senderGmail = "";
+String senderAppPassword = "";
+unsigned long lastSenderCredsLoadMs = 0;
+const unsigned long SENDER_CREDS_REFRESH_MS = 300000; // refresh every 5 minutes (WiFi only)
+
 // ===================== GPS Update Interval =====================
 // GPS update frequency to Firebase (for real-time tracking on Google Maps)
 // Options:
@@ -1141,6 +1148,48 @@ bool loadEmergencyEmailsFromFirebase() {
   return emergencyEmailCount > 0;
 }
 
+bool loadSenderCredsFromFirebase() {
+  senderGmail = "";
+  senderAppPassword = "";
+  lastSenderCredsLoadMs = millis();
+
+  if (!firebaseReady) return false;
+  if (ownerUid.length() == 0) return false;
+
+  // Canonical path (only one the app writes): `/users/{uid}/gps_email_sender/smtp_sender`
+  String path =
+      "/users/" + ownerUid + "/gps_email_sender/smtp_sender.json?auth=" + String(FIREBASE_AUTH);
+  String body = getJsonFromFirebasePath(path);
+  // Legacy fallback only: flat `/users/{uid}/gps_email_sender` (remove after DB cleanup)
+  if (body.length() == 0 || body == "null") {
+    path = "/users/" + ownerUid + "/gps_email_sender.json?auth=" + String(FIREBASE_AUTH);
+    body = getJsonFromFirebasePath(path);
+  }
+  if (body.length() == 0 || body == "null") return false;
+
+  StaticJsonDocument<384> doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    Serial.print("⚠️ Failed to parse sender creds JSON: ");
+    Serial.println(err.c_str());
+    return false;
+  }
+  if (!doc.is<JsonObject>()) return false;
+
+  // Support both keys: `email` (current) and `gmail` (older).
+  String g = doc["email"] | "";
+  if (g.length() == 0) g = doc["gmail"] | "";
+  String pw = doc["appPassword"] | "";
+  g.trim();
+  pw.trim();
+  pw.replace(" ", "");
+  if (g.length() == 0 || pw.length() == 0) return false;
+
+  senderGmail = g;
+  senderAppPassword = pw;
+  return true;
+}
+
 bool smtpReadUntilCode(WiFiClientSecure& client, const char* code, unsigned long timeoutMs = 10000) {
   String line;
   unsigned long start = millis();
@@ -1165,8 +1214,15 @@ bool smtpSendLine(WiFiClientSecure& client, const String& s) {
 }
 
 bool sendEmailViaGmailSMTP(const String& toEmail, const String& subject, const String& bodyText) {
-  if (String(GMAIL_USER).indexOf("PASTE_") == 0) {
-    Serial.println("❌ Gmail credentials not set (edit GMAIL_USER / GMAIL_APP_PASSWORD).");
+  // Prefer per-owner credentials from Firebase, fallback to compile-time defines.
+  String fromUser = senderGmail;
+  String fromPw = senderAppPassword;
+  if (fromUser.length() == 0 || fromPw.length() == 0) {
+    fromUser = String(GMAIL_USER);
+    fromPw = String(GMAIL_APP_PASSWORD);
+  }
+  if (fromUser.indexOf("PASTE_") == 0 || fromPw.indexOf("PASTE_") == 0) {
+    Serial.println("❌ Gmail credentials not set (set in app settings or edit GMAIL_USER / GMAIL_APP_PASSWORD).");
     return false;
   }
 
@@ -1197,21 +1253,21 @@ bool sendEmailViaGmailSMTP(const String& toEmail, const String& subject, const S
     return false;
   }
 
-  smtpSendLine(client, base64Encode(String(GMAIL_USER)));
+  smtpSendLine(client, base64Encode(fromUser));
   if (!smtpReadUntilCode(client, "334")) {
     Serial.println("❌ SMTP: username rejected");
     client.stop();
     return false;
   }
 
-  smtpSendLine(client, base64Encode(String(GMAIL_APP_PASSWORD)));
+  smtpSendLine(client, base64Encode(fromPw));
   if (!smtpReadUntilCode(client, "235")) {
     Serial.println("❌ SMTP: password rejected (use App Password)");
     client.stop();
     return false;
   }
 
-  smtpSendLine(client, "MAIL FROM:<" + String(GMAIL_USER) + ">");
+  smtpSendLine(client, "MAIL FROM:<" + fromUser + ">");
   if (!smtpReadUntilCode(client, "250")) {
     Serial.println("❌ SMTP: MAIL FROM failed");
     client.stop();
@@ -1234,7 +1290,7 @@ bool sendEmailViaGmailSMTP(const String& toEmail, const String& subject, const S
 
   // RFC822 message
   client.print("From: Logon Cane <");
-  client.print(String(GMAIL_USER));
+  client.print(fromUser);
   client.print(">\r\n");
   client.print("To: <");
   client.print(toEmail);
@@ -1265,6 +1321,12 @@ void sendGpsLostAlertIfNeeded() {
   if (gpsLostAlertActive) return;
   if (millis() - lastValidGpsFixMs < GPS_LOST_THRESHOLD_MS) return;
   if (millis() - lastGpsAlertSendMs < GPS_ALERT_COOLDOWN_MS) return;
+
+  // Refresh sender credentials occasionally (WiFi only).
+  if (currentConnection == CONN_WIFI &&
+      (lastSenderCredsLoadMs == 0 || millis() - lastSenderCredsLoadMs > SENDER_CREDS_REFRESH_MS)) {
+    loadSenderCredsFromFirebase();
+  }
 
   Serial.println("📨 GPS lost detected. Loading emergency emails...");
   if (!loadEmergencyEmailsFromFirebase()) {
@@ -1776,6 +1838,13 @@ void pollHardwareControl() {
       ownerUid = newOwnerUid;
       Serial.print("👤 ownerUid updated for alerts: ");
       Serial.println(ownerUid);
+      // Force refresh of sender creds for new owner.
+      senderGmail = "";
+      senderAppPassword = "";
+      lastSenderCredsLoadMs = 0;
+      if (currentConnection == CONN_WIFI) {
+        loadSenderCredsFromFirebase();
+      }
     }
   }
   

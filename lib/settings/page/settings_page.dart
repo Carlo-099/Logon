@@ -17,6 +17,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
   static const int _maxEmergencyEmails = 3;
   final List<TextEditingController> _emergencyEmailControllers = [];
+  final TextEditingController _senderGmailController = TextEditingController();
+  final TextEditingController _senderAppPasswordController =
+      TextEditingController();
 
   // Settings state
   String _selectedLanguage = 'tagalog';
@@ -44,6 +47,8 @@ class _SettingsPageState extends State<SettingsPage> {
     for (final c in _emergencyEmailControllers) {
       c.dispose();
     }
+    _senderGmailController.dispose();
+    _senderAppPasswordController.dispose();
     super.dispose();
   }
 
@@ -124,6 +129,15 @@ class _SettingsPageState extends State<SettingsPage> {
           await _firebaseService.getEmergencyContactEmails();
       if (mounted) {
         setState(() => _resetEmergencyEmailControllers(emergency));
+      }
+
+      final senderCreds =
+          await _firebaseService.getGpsEmailSenderCredentials();
+      if (mounted) {
+        setState(() {
+          _senderGmailController.text = senderCreds?['gmail'] ?? '';
+          _senderAppPasswordController.text = senderCreds?['appPassword'] ?? '';
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -206,6 +220,17 @@ class _SettingsPageState extends State<SettingsPage> {
       }
 
       await _firebaseService.saveEmergencyContactEmails(_collectEmergencyEmails());
+
+      final senderGmail = _senderGmailController.text.trim();
+      final senderPw = _senderAppPasswordController.text.trim();
+      if (senderGmail.isEmpty && senderPw.isEmpty) {
+        await _firebaseService.clearGpsEmailSenderCredentials();
+      } else {
+        await _firebaseService.saveGpsEmailSenderCredentials(
+          gmail: senderGmail,
+          appPassword: senderPw,
+        );
+      }
 
       // Reload profiling data to reflect changes
       await _loadProfilingData();
@@ -828,6 +853,66 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Widget _buildGpsAlertSenderCredentials() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'GPS alert sender account',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'This Gmail account will send the “GPS lost” email. You must use a Google App Password.\n'
+          'Warning: this stores the app password in Firebase (less secure).',
+          style: TextStyle(
+            fontSize: 13,
+            color: Colors.white.withValues(alpha: 0.75),
+          ),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _senderGmailController,
+          keyboardType: TextInputType.emailAddress,
+          // Web/mobile often “fixes” gmail.comm → gmail.com unless these are off.
+          autocorrect: false,
+          enableSuggestions: false,
+          style: const TextStyle(color: Colors.black87),
+          decoration: InputDecoration(
+            labelText: 'Sender Gmail',
+            hintText: 'yourname@gmail.com',
+            filled: true,
+            fillColor: Colors.grey[200],
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _senderAppPasswordController,
+          obscureText: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          style: const TextStyle(color: Colors.black87),
+          decoration: InputDecoration(
+            labelText: 'Gmail App Password (16 chars)',
+            hintText: 'abcd efgh ijkl mnop',
+            filled: true,
+            fillColor: Colors.grey[200],
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   // Theme Toggle (Dark/Light Mode)
   Widget _buildThemeToggle() {
     return Column(
@@ -1107,6 +1192,8 @@ class _SettingsPageState extends State<SettingsPage> {
                       _buildHardwareComponents(),
                       const SizedBox(height: 32),
                       _buildEmergencyContactEmails(),
+                      const SizedBox(height: 32),
+                      _buildGpsAlertSenderCredentials(),
                       const SizedBox(height: 32),
                       _buildThemeToggle(),
                       const SizedBox(height: 32),

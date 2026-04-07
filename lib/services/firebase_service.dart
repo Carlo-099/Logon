@@ -29,6 +29,30 @@ class FirebaseService {
     return _database.child('users').child(uid).child('emergency_contacts');
   }
 
+  /// Sender Gmail credentials used by ESP32 to send GPS-lost emails (Option C).
+  /// WARNING: Storing app passwords in RTDB is insecure; use only if you accept the risk.
+  DatabaseReference _userGpsEmailSenderRef(String uid) {
+    // Single canonical path for ESP32 + app (do not add flat keys on `gps_email_sender` parent).
+    return _database
+        .child('users')
+        .child(uid)
+        .child('gps_email_sender')
+        .child('smtp_sender');
+  }
+
+  /// Removes legacy duplicate data:
+  /// - Flat `gmail` / `appPassword` / `updatedAt` on `gps_email_sender` (old experiments)
+  /// - Wrong sibling `users/{uid}/smtp_sender` (should only live under `gps_email_sender/`)
+  Future<void> _cleanupLegacyGpsEmailSenderDuplicates(String userId) async {
+    final gpsParent = _database.child('users').child(userId).child('gps_email_sender');
+    await Future.wait<void>([
+      gpsParent.child('gmail').remove(),
+      gpsParent.child('appPassword').remove(),
+      gpsParent.child('updatedAt').remove(),
+    ]);
+    await _database.child('users').child(userId).child('smtp_sender').remove();
+  }
+
   static bool isValidEmailFormat(String email) {
     final e = email.trim();
     if (e.isEmpty) return false;
@@ -104,6 +128,79 @@ class FirebaseService {
       throw Exception('User not logged in');
     }
     await _userEmergencyContactsRef(userId).remove();
+  }
+
+  Future<Map<String, String>?> getGpsEmailSenderCredentials() async {
+    final userId = getCurrentUserId();
+    if (userId == null) return null;
+
+    final snapshot = await _userGpsEmailSenderRef(userId).get();
+    if (!snapshot.exists || snapshot.value == null) return null;
+
+    final raw = snapshot.value;
+    if (raw is! Map) return null;
+    final data = Map<String, dynamic>.from(raw);
+    // Support both keys for compatibility.
+    final gmail = (data['email'] ?? data['gmail'] ?? '').toString().trim();
+    final appPassword = (data['appPassword'] ?? '').toString();
+    if (gmail.isEmpty || appPassword.trim().isEmpty) return null;
+
+    return {
+      'gmail': gmail,
+      'appPassword': appPassword,
+    };
+  }
+
+  Future<void> saveGpsEmailSenderCredentials({
+    required String gmail,
+    required String appPassword,
+  }) async {
+    final userId = getCurrentUserId();
+    if (userId == null) {
+      throw Exception('User not logged in');
+    }
+
+    final g = gmail.trim();
+    if (!isValidEmailFormat(g)) {
+      throw Exception('Invalid sender Gmail: $g');
+    }
+
+    final pw = appPassword.replaceAll(' ', '').trim();
+    if (pw.isEmpty) {
+      throw Exception('Sender app password is required');
+    }
+
+    final ref = _userGpsEmailSenderRef(userId);
+    final payload = <String, dynamic>{
+      'email': g,
+      'appPassword': pw,
+      'updatedAt': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    try {
+      await ref.set(payload);
+    } on FirebaseException catch (e) {
+      throw Exception(
+        'Cannot save SMTP sender (${e.code}): ${e.message}. '
+        'Allow write on users/$userId/gps_email_sender/smtp_sender in Realtime Database rules.',
+      );
+    }
+
+    // Read-back from server so we know the write actually persisted (not just local cache).
+    final verify = await ref.get();
+    if (!verify.exists || verify.value == null || verify.value is! Map) {
+      throw Exception('SMTP sender write did not persist (empty or invalid snapshot after save).');
+    }
+    await _cleanupLegacyGpsEmailSenderDuplicates(userId);
+  }
+
+  Future<void> clearGpsEmailSenderCredentials() async {
+    final userId = getCurrentUserId();
+    if (userId == null) {
+      throw Exception('User not logged in');
+    }
+    await _database.child('users').child(userId).child('gps_email_sender').remove();
+    await _database.child('users').child(userId).child('smtp_sender').remove();
   }
 
   Future<Map<String, dynamic>?> getUserCaneControl() async {
