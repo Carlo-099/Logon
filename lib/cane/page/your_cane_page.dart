@@ -26,7 +26,8 @@ class _YourCanePageState extends State<YourCanePage> {
   String _volume = 'medium'; // low | medium | high
   String _vibrationIntensity = 'medium'; // low | medium | high
   String _usageLocation = 'outdoors'; // indoors | outdoors
-  List<Map<String, dynamic>> _wifiConfigs = [];
+  int _emergencyEmailCount = 0;
+  String _senderEmail = '';
 
   String _statusText = '';
 
@@ -51,7 +52,10 @@ class _YourCanePageState extends State<YourCanePage> {
     try {
       final existing = await _firebaseService.getUserCaneControl();
       if (existing != null) _applyFromMap(existing);
-      _wifiConfigs = await _firebaseService.getUserWifiConfigs();
+      final emergency = await _firebaseService.getEmergencyContactEmails();
+      final sender = await _firebaseService.getGpsEmailSenderCredentials();
+      _emergencyEmailCount = emergency.length;
+      _senderEmail = sender?['gmail'] ?? '';
 
       _sub = _firebaseService.streamUserCaneControl().listen((data) {
         if (!mounted) return;
@@ -138,94 +142,68 @@ class _YourCanePageState extends State<YourCanePage> {
     }
   }
 
-  Future<void> _saveWifiConfigs() async {
-    setState(() {
-      _saving = true;
-      _statusText = '';
-    });
-    try {
-      await _firebaseService.saveUserWifiConfigsAndMirror(_wifiConfigs);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('WiFi list saved! ESP32 restart requested to apply changes.'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _statusText = 'WiFi save failed: $e');
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  Future<void> _showWifiManager() async {
-    final ssidController = TextEditingController();
-    final passController = TextEditingController();
+  Future<void> _manageEmergencyContacts() async {
+    final rootContext = context;
+    final existing = await _firebaseService.getEmergencyContactEmails();
+    final controllers = List<TextEditingController>.generate(
+      existing.isEmpty ? 1 : existing.length,
+      (i) => TextEditingController(text: existing.isEmpty ? '' : existing[i]),
+    );
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF2A2A2A),
-      builder: (context) {
+      builder: (ctx) {
         return StatefulBuilder(
-          builder: (context, setModalState) {
+          builder: (sheetContext, setModalState) {
             return Padding(
               padding: EdgeInsets.only(
                 left: 16,
                 right: 16,
                 top: 16,
-                bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
+                bottom: 16 + MediaQuery.of(ctx).viewInsets.bottom,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Manage ESP32 WiFi List',
+                    'Emergency contact emails',
                     style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'ESP32 tries WiFi #1 first, then #2, then next.',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                  const SizedBox(height: 12),
-                  ..._wifiConfigs.asMap().entries.map((entry) {
-                    final i = entry.key;
-                    final item = entry.value;
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1F1F1F),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.white12),
-                      ),
+                  const SizedBox(height: 10),
+                  ...List.generate(controllers.length, (index) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
                       child: Row(
                         children: [
-                          Text('#${i + 1}', style: const TextStyle(color: Colors.cyanAccent)),
-                          const SizedBox(width: 8),
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(item['ssid']?.toString() ?? '', style: const TextStyle(color: Colors.white)),
-                                Text(
-                                  (item['password']?.toString().isNotEmpty ?? false) ? '••••••••' : '(Open network)',
-                                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                            child: TextField(
+                              controller: controllers[index],
+                              keyboardType: TextInputType.emailAddress,
+                              style: const TextStyle(color: Colors.white),
+                              decoration: InputDecoration(
+                                labelText: 'Email ${index + 1}',
+                                labelStyle: const TextStyle(color: Colors.white70),
+                                enabledBorder: const OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.white24),
                                 ),
-                              ],
+                                focusedBorder: const OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.green),
+                                ),
+                              ),
                             ),
                           ),
                           IconButton(
                             onPressed: () {
-                              setState(() {
-                                _wifiConfigs.removeAt(i);
-                              });
+                              if (controllers.length == 1) {
+                                controllers.first.clear();
+                              } else {
+                                // Don't dispose controllers while TextFields are mounted.
+                                // We'll dispose all controllers after the sheet closes.
+                                controllers.removeAt(index);
+                              }
                               setModalState(() {});
                             },
                             icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
@@ -234,58 +212,45 @@ class _YourCanePageState extends State<YourCanePage> {
                       ),
                     );
                   }),
+                  if (controllers.length < 3)
+                    TextButton.icon(
+                      onPressed: () {
+                        controllers.add(TextEditingController());
+                        setModalState(() {});
+                      },
+                      icon: const Icon(Icons.add, color: Colors.greenAccent),
+                      label: const Text('Add another email', style: TextStyle(color: Colors.greenAccent)),
+                    ),
                   const SizedBox(height: 8),
-                  TextField(
-                    controller: ssidController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      labelText: 'WiFi name (SSID)',
-                      labelStyle: TextStyle(color: Colors.white70),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final emails = controllers
+                            .map((c) => c.text.trim())
+                            .where((e) => e.isNotEmpty)
+                            .toList();
+                        try {
+                          await _firebaseService.saveEmergencyContactEmails(emails);
+                          if (!mounted) return;
+                          setState(() => _emergencyEmailCount = emails.length);
+                          Navigator.of(ctx).pop();
+                          ScaffoldMessenger.of(rootContext).showSnackBar(
+                            const SnackBar(
+                              content: Text('Emergency contacts saved'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        } catch (e) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(rootContext).showSnackBar(
+                            SnackBar(content: Text('Save failed: $e'), backgroundColor: Colors.red),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.save),
+                      label: const Text('Save'),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: passController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      labelText: 'WiFi password',
-                      labelStyle: TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                            final ssid = ssidController.text.trim();
-                            final pass = passController.text;
-                            if (ssid.isEmpty) return;
-                            setState(() {
-                              _wifiConfigs.add({'ssid': ssid, 'password': pass, 'priority': _wifiConfigs.length + 1});
-                            });
-                            ssidController.clear();
-                            passController.clear();
-                            setModalState(() {});
-                          },
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: _saving
-                              ? null
-                              : () async {
-                                  await _saveWifiConfigs();
-                                  if (context.mounted) Navigator.pop(context);
-                                },
-                          icon: const Icon(Icons.save),
-                          label: const Text('Save WiFi List'),
-                        ),
-                      ),
-                    ],
                   ),
                 ],
               ),
@@ -294,6 +259,119 @@ class _YourCanePageState extends State<YourCanePage> {
         );
       },
     );
+
+    for (final c in controllers) {
+      c.dispose();
+    }
+  }
+
+  Future<void> _manageGpsSender() async {
+    final rootContext = context;
+    final existing = await _firebaseService.getGpsEmailSenderCredentials();
+    final gmailController = TextEditingController(text: existing?['gmail'] ?? '');
+    final pwController = TextEditingController(text: existing?['appPassword'] ?? '');
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF2A2A2A),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: 16 + MediaQuery.of(ctx).viewInsets.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'GPS alert sender account',
+                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: gmailController,
+                keyboardType: TextInputType.emailAddress,
+                autocorrect: false,
+                enableSuggestions: false,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Sender Gmail',
+                  labelStyle: TextStyle(color: Colors.white70),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: pwController,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Gmail App Password',
+                  labelStyle: TextStyle(color: Colors.white70),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        try {
+                          await _firebaseService.clearGpsEmailSenderCredentials();
+                          if (!mounted) return;
+                          setState(() => _senderEmail = '');
+                          Navigator.of(ctx).pop();
+                          ScaffoldMessenger.of(rootContext).showSnackBar(
+                            const SnackBar(content: Text('Sender cleared')),
+                          );
+                        } catch (e) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(rootContext).showSnackBar(
+                            SnackBar(content: Text('Clear failed: $e'), backgroundColor: Colors.red),
+                          );
+                        }
+                      },
+                      child: const Text('Clear'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        try {
+                          await _firebaseService.saveGpsEmailSenderCredentials(
+                            gmail: gmailController.text.trim(),
+                            appPassword: pwController.text.trim(),
+                          );
+                          if (!mounted) return;
+                          setState(() => _senderEmail = gmailController.text.trim());
+                          Navigator.of(ctx).pop();
+                          ScaffoldMessenger.of(rootContext).showSnackBar(
+                            const SnackBar(content: Text('Sender saved'), backgroundColor: Colors.green),
+                          );
+                        } catch (e) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(rootContext).showSnackBar(
+                            SnackBar(content: Text('Save failed: $e'), backgroundColor: Colors.red),
+                          );
+                        }
+                      },
+                      child: const Text('Save'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    gmailController.dispose();
+    pwController.dispose();
   }
 
   Future<void> _pickOption({
@@ -469,13 +547,6 @@ class _YourCanePageState extends State<YourCanePage> {
                         childAspectRatio: 1.15,
                         children: [
                           _buildCaneCard(
-                            title: 'WiFi Networks',
-                            subtitle: _wifiConfigs.isEmpty ? 'No saved networks' : '${_wifiConfigs.length} saved',
-                            icon: Icons.wifi,
-                            borderColor: Colors.blueAccent,
-                            onTap: _showWifiManager,
-                          ),
-                          _buildCaneCard(
                             title: 'Ultrasonic',
                             subtitle: _ultrasonicEnabled ? 'Enabled' : 'Disabled',
                             icon: Icons.sensors,
@@ -593,6 +664,22 @@ class _YourCanePageState extends State<YourCanePage> {
                               );
                               await _save(restartRequested: false);
                             },
+                          ),
+                          _buildCaneCard(
+                            title: 'Emergency Contacts',
+                            subtitle: _emergencyEmailCount == 0
+                                ? 'No emails set'
+                                : '$_emergencyEmailCount email(s)',
+                            icon: Icons.emergency_share_outlined,
+                            borderColor: Colors.amberAccent,
+                            onTap: _manageEmergencyContacts,
+                          ),
+                          _buildCaneCard(
+                            title: 'GPS Sender',
+                            subtitle: _senderEmail.isEmpty ? 'Not configured' : _senderEmail,
+                            icon: Icons.mail_outline,
+                            borderColor: Colors.pinkAccent,
+                            onTap: _manageGpsSender,
                           ),
                         ],
                       ),

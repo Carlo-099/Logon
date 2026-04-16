@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "firebase functions:secrets:set SENDGRID_API_KEY": "login-4e779"
+  },
+  "targets": {},
+  "etags": {}
+}

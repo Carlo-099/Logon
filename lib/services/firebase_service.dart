@@ -446,10 +446,27 @@ class FirebaseService {
       if (userId == null) {
         throw Exception("User not logged in");
       }
-      
-      // Delete profiling data
-      await _database.child('profiling').child(userId).remove();
-      
+
+      final ref = _database.child('profiling').child(userId);
+      final snap = await ref.get();
+      // Preserve app preferences stored under profiling (theme / font size).
+      dynamic keepDark;
+      dynamic keepTextSize;
+      if (snap.exists && snap.value is Map) {
+        final m = Map<String, dynamic>.from(snap.value! as Map);
+        keepDark = m['isDarkMode'];
+        keepTextSize = m['textSize'];
+      }
+
+      await ref.remove();
+
+      if (keepDark != null) {
+        await ref.child('isDarkMode').set(keepDark);
+      }
+      if (keepTextSize != null) {
+        await ref.child('textSize').set(keepTextSize);
+      }
+
       // Also clear hardware_control to reset ESP32
       await _database.child('hardware_control').remove();
     } catch (e) {
@@ -529,6 +546,31 @@ class FirebaseService {
   }
 
   // ===================== ESP32 CONTROL METHODS =====================
+
+  /// Updates a subset of `/hardware_control` without overwriting other fields.
+  Future<void> updateHardwareControlFields(Map<String, dynamic> fields) async {
+    try {
+      final ownerUid = getCurrentUserId();
+      final data = Map<String, dynamic>.from(fields);
+      data['timestamp'] = DateTime.now().millisecondsSinceEpoch;
+      if (ownerUid != null && ownerUid.isNotEmpty) {
+        data['ownerUid'] = ownerUid;
+      }
+      await _database.child('hardware_control').update(data);
+    } catch (e) {
+      throw Exception('Failed to update hardware control: $e');
+    }
+  }
+
+  /// OLED screen selector for the cane.
+  /// Values: `battery` | `sensor` | `connections`
+  Future<void> setOledMode(String mode) async {
+    final m = mode.trim().toLowerCase();
+    if (m != 'battery' && m != 'sensor' && m != 'connections') {
+      throw Exception('Invalid OLED mode: $mode');
+    }
+    await updateHardwareControlFields({'oledMode': m});
+  }
 
   // Save hardware control settings (for ESP32 to read)
   Future<void> saveHardwareControl({
