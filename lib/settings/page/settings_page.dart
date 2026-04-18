@@ -18,6 +18,11 @@ class _SettingsPageState extends State<SettingsPage> {
   String _selectedTextSize = 'medium';
   List<Map<String, dynamic>> _wifiConfigs = [];
 
+  static const _darkGreen = Color(0xFF0B5D3B);
+  static const _pageBackground = Color(0xFFF4F8F5);
+  static const _cardBackground = Colors.white;
+  static const _dangerRed = Color(0xFFB23A3A);
+
   @override
   void initState() {
     super.initState();
@@ -313,13 +318,16 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _sectionTitle(String t) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
+      padding: const EdgeInsets.fromLTRB(18, 20, 18, 10),
       child: Text(
         t,
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Theme.of(context).textTheme.bodySmall?.color,
-              fontWeight: FontWeight.w700,
-            ),
+        style: const TextStyle(
+          fontFamily: 'Georgia',
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.8,
+          color: _darkGreen,
+        ),
       ),
     );
   }
@@ -331,12 +339,74 @@ class _SettingsPageState extends State<SettingsPage> {
     VoidCallback? onTap,
     Color? color,
   }) {
-    return ListTile(
-      leading: Icon(icon, color: color),
-      title: Text(title, style: TextStyle(color: color)),
-      subtitle: subtitle == null ? null : Text(subtitle),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: onTap,
+    final itemColor = color ?? _darkGreen;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: _cardBackground,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: itemColor.withOpacity(0.12)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: itemColor.withOpacity(0.10),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon, color: itemColor),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: itemColor,
+            fontWeight: FontWeight.w700,
+            fontFamily: 'Georgia',
+          ),
+        ),
+        subtitle: subtitle == null
+            ? null
+            : Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: (color == null ? Colors.black87 : itemColor.withOpacity(0.85)),
+                    fontSize: 12.5,
+                  ),
+                ),
+              ),
+        trailing: Icon(Icons.chevron_right, color: itemColor),
+        onTap: onTap,
+      ),
+    );
+  }
+
+  Widget _sectionCard({required List<Widget> children}) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        color: _cardBackground,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.07),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(children: children),
     );
   }
 
@@ -346,86 +416,183 @@ class _SettingsPageState extends State<SettingsPage> {
 
     if (_isLoading) {
       return Scaffold(
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        body: const Center(child: CircularProgressIndicator()),
+        backgroundColor: _pageBackground,
+        body: const Center(
+          child: CircularProgressIndicator(color: _darkGreen),
+        ),
       );
     }
 
     return Scaffold(
+      backgroundColor: _pageBackground,
       appBar: AppBar(
-        title: const Text('Settings'),
+        backgroundColor: _pageBackground,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        foregroundColor: _darkGreen,
+        title: const Text(
+          'Settings',
+          style: TextStyle(
+            fontFamily: 'Georgia',
+            fontWeight: FontWeight.bold,
+            color: _darkGreen,
+          ),
+        ),
       ),
       body: ListView(
         children: [
           _sectionTitle('ACCOUNT'),
-          _tile(
-            icon: Icons.person_outline,
-            title: 'Change display name',
-            subtitle: (user?.displayName?.isNotEmpty == true) ? user!.displayName : 'Not set',
-            onTap: _changeDisplayName,
+          _sectionCard(
+            children: [
+              _tile(
+                icon: Icons.person_outline,
+                title: 'Change display name',
+                subtitle: (user?.displayName?.isNotEmpty == true) ? user!.displayName : 'Not set',
+                onTap: _changeDisplayName,
+              ),
+              _tile(
+                icon: Icons.alternate_email,
+                title: 'Change email',
+                subtitle: user?.email ?? 'Not set',
+                onTap: _changeEmail,
+              ),
+              _tile(
+                icon: Icons.lock_outline,
+                title: 'Change password',
+                subtitle: 'Update your account password',
+                onTap: _changePassword,
+              ),
+            ],
           ),
-          _tile(
-            icon: Icons.alternate_email,
-            title: 'Change email',
-            subtitle: user?.email ?? 'Not set',
-            onTap: _changeEmail,
-          ),
-          _tile(
-            icon: Icons.lock_outline,
-            title: 'Change password',
-            subtitle: 'Update your account password',
-            onTap: _changePassword,
-          ),
-          const Divider(height: 28),
           _sectionTitle('CANE'),
-          _tile(
-            icon: Icons.wifi,
-            title: 'WiFi Networks',
-            subtitle: _wifiConfigs.isEmpty ? 'No saved networks' : '${_wifiConfigs.length} saved network(s)',
-            onTap: () async {
-              await showWifiNetworksSheet(
-                context,
-                _firebaseService,
-                _wifiConfigs,
-                onLocalChanged: (updated) {
-                  setState(() => _wifiConfigs = updated);
+          _sectionCard(
+            children: [
+              _tile(
+                icon: Icons.wifi,
+                title: 'WiFi Networks',
+                subtitle: _wifiConfigs.isEmpty ? 'No saved networks' : '${_wifiConfigs.length} saved network(s)',
+                onTap: () async {
+                  await showWifiNetworksSheet(
+                    context,
+                    _firebaseService,
+                    _wifiConfigs,
+                    onLocalChanged: (updated) {
+                      setState(() => _wifiConfigs = updated);
+                    },
+                  );
+                  final fresh = await _firebaseService.getUserWifiConfigs();
+                  if (mounted) setState(() => _wifiConfigs = fresh);
                 },
-              );
-              final fresh = await _firebaseService.getUserWifiConfigs();
-              if (mounted) setState(() => _wifiConfigs = fresh);
-            },
+              ),
+            ],
           ),
-          const Divider(height: 28),
           _sectionTitle('PREFERENCES'),
-          SwitchListTile(
-            secondary: Icon(_isDarkMode ? Icons.dark_mode : Icons.light_mode),
-            title: Text(_isDarkMode ? 'Dark mode' : 'Light mode'),
-            value: _isDarkMode,
-            onChanged: _saveThemePreference,
+          _sectionCard(
+            children: [
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _cardBackground,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: _darkGreen.withOpacity(0.12)),
+                ),
+                child: SwitchListTile(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  secondary: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: _darkGreen.withOpacity(0.10),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      _isDarkMode ? Icons.dark_mode : Icons.light_mode,
+                      color: _darkGreen,
+                    ),
+                  ),
+                  activeColor: _darkGreen,
+                  title: Text(
+                    _isDarkMode ? 'Dark mode' : 'Light mode',
+                    style: const TextStyle(
+                      color: _darkGreen,
+                      fontWeight: FontWeight.w700,
+                      fontFamily: 'Georgia',
+                    ),
+                  ),
+                  value: _isDarkMode,
+                  onChanged: _saveThemePreference,
+                ),
+              ),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _cardBackground,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: _darkGreen.withOpacity(0.12)),
+                ),
+                child: ListTile(
+                  leading: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: _darkGreen.withOpacity(0.10),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.format_size, color: _darkGreen),
+                  ),
+                  title: const Text(
+                    'Font size',
+                    style: TextStyle(
+                      color: _darkGreen,
+                      fontWeight: FontWeight.w700,
+                      fontFamily: 'Georgia',
+                    ),
+                  ),
+                  subtitle: Text(_selectedTextSize == 'large' ? 'Large' : 'Medium'),
+                  trailing: SegmentedButton<String>(
+                    style: ButtonStyle(
+                      backgroundColor: WidgetStateProperty.resolveWith(
+                        (states) => states.contains(WidgetState.selected)
+                            ? _darkGreen
+                            : Colors.white,
+                      ),
+                      foregroundColor: WidgetStateProperty.resolveWith(
+                        (states) => states.contains(WidgetState.selected)
+                            ? Colors.white
+                            : _darkGreen,
+                      ),
+                      side: WidgetStateProperty.all(
+                        const BorderSide(color: _darkGreen),
+                      ),
+                      shape: WidgetStateProperty.all(
+                        RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                    segments: const [
+                      ButtonSegment(value: 'medium', label: Text('M')),
+                      ButtonSegment(value: 'large', label: Text('L')),
+                    ],
+                    selected: {_selectedTextSize},
+                    onSelectionChanged: (s) => _saveTextSize(s.first),
+                  ),
+                ),
+              ),
+            ],
           ),
-          ListTile(
-            leading: const Icon(Icons.format_size),
-            title: const Text('Font size'),
-            subtitle: Text(_selectedTextSize == 'large' ? 'Large' : 'Medium'),
-            trailing: SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'medium', label: Text('M')),
-                ButtonSegment(value: 'large', label: Text('L')),
-              ],
-              selected: {_selectedTextSize},
-              onSelectionChanged: (s) => _saveTextSize(s.first),
-            ),
-          ),
-          const Divider(height: 28),
           _sectionTitle('DANGER ZONE'),
-          _tile(
-            icon: Icons.delete_outline,
-            color: Colors.red,
-            title: 'Delete profiling data',
-            subtitle: 'Keep account, remove old profile data',
-            onTap: _showDeleteConfirmation,
+          _sectionCard(
+            children: [
+              _tile(
+                icon: Icons.delete_outline,
+                color: _dangerRed,
+                title: 'Delete profiling data',
+                subtitle: 'Keep account, remove old profile data',
+                onTap: _showDeleteConfirmation,
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
         ],
       ),
     );

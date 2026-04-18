@@ -13,6 +13,8 @@ class YourCanePage extends StatefulWidget {
 class _YourCanePageState extends State<YourCanePage> {
   final _firebaseService = FirebaseService();
   StreamSubscription<Map<String, dynamic>?>? _sub;
+  static const _darkGreen = Color(0xFF0B5D3B);
+  static const _pageBackground = Color(0xFFF4F8F5);
 
   bool _loading = true;
   bool _saving = false;
@@ -433,14 +435,14 @@ class _YourCanePageState extends State<YourCanePage> {
       onTap: _saving ? null : onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF2A2A2A),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: borderColor, width: 2),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: borderColor.withOpacity(0.9), width: 2),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.25),
-              blurRadius: 10,
-              offset: const Offset(0, 6),
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
             ),
           ],
         ),
@@ -454,30 +456,36 @@ class _YourCanePageState extends State<YourCanePage> {
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: borderColor.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
+                    color: borderColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                   child: Icon(icon, color: borderColor),
                 ),
                 const Spacer(),
-                const Icon(Icons.chevron_right, color: Colors.white60),
+                Icon(Icons.chevron_right, color: Colors.black.withOpacity(0.45)),
               ],
             ),
             const SizedBox(height: 12),
             Text(
               title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
+                color: Color(0xFF173328),
+                fontSize: 15,
                 fontWeight: FontWeight.bold,
+                fontFamily: 'Georgia',
               ),
             ),
             const SizedBox(height: 6),
             Text(
               subtitle,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 13,
+                color: Colors.black87,
+                fontSize: 12.5,
+                height: 1.25,
               ),
             ),
           ],
@@ -488,21 +496,34 @@ class _YourCanePageState extends State<YourCanePage> {
 
   @override
   Widget build(BuildContext context) {
+    final languageLabel = _language == 'none' ? 'Display only' : _language.toUpperCase();
+    final volumeLabel = _volume.toUpperCase();
+    final locationLabel = _usageLocation.toUpperCase();
     return Scaffold(
-      backgroundColor: const Color(0xFF1A1A1A),
+      backgroundColor: _pageBackground,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text('Your Cane'),
+        backgroundColor: _pageBackground,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: _darkGreen,
+        title: const Text(
+          'Your Cane',
+          style: TextStyle(
+            fontFamily: 'Georgia',
+            fontWeight: FontWeight.bold,
+            color: _darkGreen,
+          ),
+        ),
         actions: [
           IconButton(
             tooltip: 'Reload',
             onPressed: _saving ? null : _bootstrap,
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: _darkGreen),
           ),
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: _darkGreen))
           : SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -510,23 +531,90 @@ class _YourCanePageState extends State<YourCanePage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(14),
+                      padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF232323),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white12),
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.06),
+                            blurRadius: 18,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
                       ),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.info_outline, color: Colors.white70),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              _saving
-                                  ? 'Saving…'
-                                  : 'Adjust your cane settings. Changes update Firebase and the ESP32 in real-time.',
-                              style: const TextStyle(color: Colors.white70, fontSize: 13),
-                            ),
+                          Row(
+                            children: [
+                              Container(
+                                width: 48,
+                                height: 48,
+                                decoration: BoxDecoration(
+                                  color: _darkGreen.withOpacity(0.10),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: const Icon(
+                                  Icons.accessibility_new,
+                                  color: _darkGreen,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Cane Profile',
+                                      style: TextStyle(
+                                        color: _darkGreen,
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        fontFamily: 'Georgia',
+                                      ),
+                                    ),
+                                    SizedBox(height: 2),
+                                    Text(
+                                      'Customize the smart cane experience.',
+                                      style: TextStyle(
+                                        color: Colors.black54,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _buildProfileChip('Language', languageLabel),
+                              _buildProfileChip('Volume', volumeLabel),
+                              _buildProfileChip('Location', locationLabel),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              const Icon(Icons.info_outline, color: _darkGreen, size: 18),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _saving
+                                      ? 'Saving your cane profile...'
+                                      : 'Adjust your cane settings. Changes update Firebase and the ESP32 in real-time.',
+                                  style: const TextStyle(
+                                    color: Colors.black87,
+                                    fontSize: 13,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -535,7 +623,7 @@ class _YourCanePageState extends State<YourCanePage> {
                       const SizedBox(height: 10),
                       Text(
                         _statusText,
-                        style: const TextStyle(color: Colors.orangeAccent),
+                        style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.w600),
                       ),
                     ],
                     const SizedBox(height: 16),
@@ -544,7 +632,7 @@ class _YourCanePageState extends State<YourCanePage> {
                         crossAxisCount: 2,
                         crossAxisSpacing: 12,
                         mainAxisSpacing: 12,
-                        childAspectRatio: 1.15,
+                        childAspectRatio: 1.02,
                         children: [
                           _buildCaneCard(
                             title: 'Ultrasonic',
@@ -692,20 +780,59 @@ class _YourCanePageState extends State<YourCanePage> {
                               await _save(restartRequested: true);
                             },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        backgroundColor: _darkGreen,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                       ),
                       icon: const Icon(Icons.restart_alt, color: Colors.white),
                       label: const Text(
                         'Apply & Restart Cane',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'Georgia',
+                          fontSize: 16,
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildProfileChip(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: _darkGreen.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _darkGreen.withOpacity(0.12)),
+      ),
+      child: RichText(
+        text: TextSpan(
+          style: const TextStyle(fontSize: 12.5, color: Colors.black87),
+          children: [
+            TextSpan(
+              text: '$label: ',
+              style: const TextStyle(
+                color: _darkGreen,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Georgia',
+              ),
+            ),
+            TextSpan(
+              text: value,
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

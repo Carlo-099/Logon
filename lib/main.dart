@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:logon/login/page/login_page.dart';
+import 'package:logon/landing/page/landing_page.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -175,7 +176,7 @@ class _MyAppState extends State<MyApp> {
           child: child ?? const SizedBox.shrink(),
         );
       },
-      home: const LoginPage(),
+      home: const LandingPage(),
     );
   }
 }

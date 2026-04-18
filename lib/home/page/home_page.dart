@@ -86,123 +86,167 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    const darkGreen = Color(0xFF0B5D3B);
+    final languageRaw = (_profilingData?['language'] ?? 'english').toString();
+    final volumeRaw = (_profilingData?['volume'] ?? 'medium').toString();
+    final languageLabel =
+        languageRaw.toLowerCase().contains('tagalog') ? 'Tagalog' : 'English';
+    final volumeLabel = volumeRaw.toLowerCase() == 'high'
+        ? 'High'
+        : volumeRaw.toLowerCase() == 'low'
+            ? 'Low'
+            : 'Medium';
+    const trailModeLabel = 'Active';
     return Scaffold(
-      backgroundColor: const Color(0xFF1A1A1A), // Dark gray background
+      backgroundColor: Colors.black,
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
+            Positioned.fill(
+              child: Image.asset(
+                'assets/images/highkers.png',
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(color: Colors.black);
+                },
+              ),
+            ),
+            Positioned.fill(
+              child: Container(color: Colors.black.withOpacity(0.35)),
+            ),
+            Column(
+              children: [
             // Header Section
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              color: Colors.grey[300],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'HOME',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
+                  InkWell(
+                    borderRadius: BorderRadius.circular(999),
+                    onTap: () {
+                      // UI-only: back action follows app flow.
+                    },
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white,
+                      ),
+                      child: const Icon(
+                        Icons.arrow_back_ios_new,
+                        color: darkGreen,
+                        size: 18,
+                      ),
                     ),
                   ),
-                  Row(
-                    children: [
-                      // GABAY TECH Logo
-                      Row(
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.blue, width: 2),
-                              color: Colors.white,
-                            ),
-                            child: const Icon(
-                              Icons.accessible_forward,
-                              color: Colors.blue,
-                              size: 20,
-                            ),
+                  IconButton(
+                    icon: const Icon(Icons.menu, color: Colors.white),
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          backgroundColor: const Color(0xFFF7FBF8),
+                          surfaceTintColor: Colors.transparent,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24),
+                            side: BorderSide(color: darkGreen.withOpacity(0.15)),
                           ),
-                          const SizedBox(width: 6),
-                          const Text(
-                            'GABAY',
+                          titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+                          contentPadding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+                          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          title: const Text(
+                            'Menu',
                             style: TextStyle(
-                              color: Colors.blue,
-                              fontSize: 16,
+                              color: darkGreen,
+                              fontFamily: 'Georgia',
                               fontWeight: FontWeight.bold,
+                              fontSize: 20,
                             ),
                           ),
-                          const SizedBox(width: 2),
-                          const Text(
-                            'TECH',
-                            style: TextStyle(
-                              color: Colors.blue,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(width: 16),
-                      // Hamburger menu
-                      IconButton(
-                        icon: const Icon(Icons.menu, color: Colors.white),
-                        onPressed: () {
-                          // Show menu options
-                          showDialog(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              backgroundColor: const Color(0xFF1A1A1A),
-                              title: const Text(
-                                'Menu',
-                                style: TextStyle(color: Colors.white),
-                              ),
-                              content: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  ListTile(
-                                    leading: const Icon(Icons.settings, color: Colors.white),
-                                    title: const Text(
-                                      'Settings',
-                                      style: TextStyle(color: Colors.white),
-                                    ),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => const SettingsPage(),
-                                        ),
-                                      );
-                                    },
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Material(
+                                color: const Color(0xFFEAF4EE),
+                                borderRadius: BorderRadius.circular(18),
+                                child: ListTile(
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 4,
                                   ),
-                                  const Divider(color: Colors.grey),
-                                  ListTile(
-                                    leading: const Icon(Icons.logout, color: Colors.white),
-                                    title: const Text(
-                                      'Logout',
-                                      style: TextStyle(color: Colors.white),
+                                  leading: const Icon(Icons.settings, color: darkGreen),
+                                  title: const Text(
+                                    'Settings',
+                                    style: TextStyle(
+                                      color: darkGreen,
+                                      fontFamily: 'Georgia',
+                                      fontWeight: FontWeight.w700,
                                     ),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      logout();
-                                    },
                                   ),
-                                ],
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context),
-                                  child: const Text('Cancel'),
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => const SettingsPage(),
+                                      ),
+                                    );
+                                  },
                                 ),
-                              ],
+                              ),
+                              const SizedBox(height: 12),
+                              Material(
+                                color: const Color(0xFFFFF4F4),
+                                borderRadius: BorderRadius.circular(18),
+                                child: ListTile(
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 4,
+                                  ),
+                                  leading: const Icon(Icons.logout, color: Color(0xFFB23A3A)),
+                                  title: const Text(
+                                    'Logout',
+                                    style: TextStyle(
+                                      color: Color(0xFF7A2E2E),
+                                      fontFamily: 'Georgia',
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    logout();
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              style: TextButton.styleFrom(
+                                foregroundColor: darkGreen,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 10,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                              child: const Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  fontFamily: 'Georgia',
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ),
-                          );
-                        },
-                      ),
-                    ],
+                          ],
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -210,20 +254,41 @@ class _HomePageState extends State<HomePage> {
             // Main Content
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Set Up Your Cane Section (replaces profiling)
-                    const Text(
-                      'Set Up Your Cane',
+                    const SizedBox(height: 4),
+                    Text(
+                      'Good Day, Elderly and Hikers',
                       style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
+                        color: Colors.white70,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        fontFamily: 'Georgia',
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Set up Your Cane',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 34,
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'Georgia',
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      'Cane Settings',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'Georgia',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
                     // Clickable Cane Setup Container
                     InkWell(
                       onTap: () {
@@ -233,92 +298,231 @@ class _HomePageState extends State<HomePage> {
                 );
               },
                       child: Container(
-                        padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.25),
+                              blurRadius: 12,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
                         ),
-                        child: Row(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Your Cane Settings',
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Language: ${_profilingData?['language'] ?? 'Not set'}',
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Volume: ${_profilingData?['volume'] ?? 'Not set'}',
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Tap to customize the cane',
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
-                                ],
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              decoration: const BoxDecoration(
+                                color: darkGreen,
+                                borderRadius: BorderRadius.only(
+                                  topLeft: Radius.circular(20),
+                                  topRight: Radius.circular(20),
+                                ),
+                              ),
+                              child: const Text(
+                                'Your Cane Profile',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'Georgia',
+                                ),
                               ),
                             ),
-                            const SizedBox(width: 16),
-                            // Profile image
-                            ClipOval(
-                              child: Image.asset(
-                                'assets/images/pf.jpg',
-                                width: 80,
-                                height: 80,
-                                fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) {
-                                  // Fallback to placeholder if image not found
-                                  return Container(
-                                    width: 80,
-                                    height: 80,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.grey[300],
+                            Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Container(
+                                width: double.infinity,
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: darkGreen, width: 2),
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                padding: const EdgeInsets.all(16),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              const Text(
+                                                'Language:',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontFamily: 'Georgia',
+                                                  color: Colors.black,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                languageLabel,
+                                                style: const TextStyle(
+                                                  fontFamily: 'Georgia',
+                                                  color: Colors.black87,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Row(
+                                            children: [
+                                              const Text(
+                                                'Volume:',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontFamily: 'Georgia',
+                                                  color: Colors.black,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                volumeLabel,
+                                                style: const TextStyle(
+                                                  fontFamily: 'Georgia',
+                                                  color: Colors.black87,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Row(
+                                            children: [
+                                              const Text(
+                                                'Trail Mode:',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontFamily: 'Georgia',
+                                                  color: Colors.black,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                trailModeLabel,
+                                                style: const TextStyle(
+                                                  fontFamily: 'Georgia',
+                                                  color: Colors.black87,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                    child: const Icon(
-                                      Icons.settings,
-                                      size: 50,
-                                      color: Colors.grey,
+                                    const SizedBox(width: 16),
+                                    Column(
+                                      children: [
+                                        Container(
+                                          width: 70,
+                                          height: 70,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            border: Border.all(color: darkGreen, width: 3),
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          'Tap Card to Customize',
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                            fontFamily: 'Georgia',
+                                            color: darkGreen,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                  );
-                                },
+                                  ],
+                                ),
                               ),
                             ),
                           ],
                         ),
                 ),
               ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      "Configure your cane and save settings to Firebase.",
+                    const SizedBox(height: 20),
+                    Text(
+                      'Google Maps',
                       style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 14,
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'Georgia',
                       ),
                     ),
-                    const SizedBox(height: 32),
-                    // OLED quick view buttons
+                    const SizedBox(height: 10),
+                    InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => const MapPage()),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.2),
+                              blurRadius: 10,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              margin: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                              decoration: BoxDecoration(
+                                color: darkGreen,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: const Text(
+                                'Show the current location of user',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontFamily: 'Georgia',
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: SizedBox(
+                                height: 165,
+                                width: double.infinity,
+                                child: Image.asset(
+                                  'assets/images/GM.jpg',
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      'Screen Button Display',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'Georgia',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     Row(
                       children: [
                         Expanded(
@@ -346,13 +550,20 @@ class _HomePageState extends State<HomePage> {
                               }
                             },
                             icon: const Icon(Icons.battery_full),
-                            label: const Text('Battery'),
+                            label: const Text(
+                              'Battery',
+                              style: TextStyle(
+                                fontFamily: 'Georgia',
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2A2A2A),
+                              backgroundColor: darkGreen,
                               foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                              elevation: 0,
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
+                                borderRadius: BorderRadius.circular(18),
                               ),
                             ),
                           ),
@@ -382,14 +593,21 @@ class _HomePageState extends State<HomePage> {
                                 }
                               }
                             },
-                            icon: const Icon(Icons.straighten),
-                            label: const Text('Sensor'),
+                            icon: const Icon(Icons.sensors),
+                            label: const Text(
+                              'Sensor',
+                              style: TextStyle(
+                                fontFamily: 'Georgia',
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2A2A2A),
+                              backgroundColor: darkGreen,
                               foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                              elevation: 0,
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
+                                borderRadius: BorderRadius.circular(18),
                               ),
                             ),
                           ),
@@ -420,30 +638,30 @@ class _HomePageState extends State<HomePage> {
                               }
                             },
                             icon: const Icon(Icons.wifi_tethering),
-                            label: const Text('Links'),
+                            label: const Text(
+                              'Links',
+                              style: TextStyle(
+                                fontFamily: 'Georgia',
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2A2A2A),
+                              backgroundColor: darkGreen,
                               foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                              elevation: 0,
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
+                                borderRadius: BorderRadius.circular(18),
                               ),
                             ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 0),
                     // Map Section
-                    const Text(
-                      'Map',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-              ),
-            ),
-                    const SizedBox(height: 16),
+                    const SizedBox.shrink(),
+                    const SizedBox(height: 0),
                     // Clickable Map Container
                     InkWell(
                       onTap: () {
@@ -453,7 +671,7 @@ class _HomePageState extends State<HomePage> {
                 );
               },
                       child: Container(
-                        height: 300,
+                        height: 0,
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(12),
@@ -535,20 +753,16 @@ class _HomePageState extends State<HomePage> {
                         ),
                 ),
               ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      "Maps show the current location of the users to track where the user go.",
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 0),
+                    const SizedBox.shrink(),
+                    const SizedBox(height: 0),
                   ],
                 ),
               ),
             ),
-          ],
+              ],
+            ),
+            ],
         ),
       ),
     );
